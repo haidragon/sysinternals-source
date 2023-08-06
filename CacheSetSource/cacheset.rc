@@ -1,0 +1,129 @@
+//Microsoft Developer Studio generated resource script.
+//
+#include "resource.h"
+
+#define APSTUDIO_READONLY_SYMBOLS
+/////////////////////////////////////////////////////////////////////////////
+//
+// Generated from the TEXTINCLUDE 2 resource.
+//
+#include "afxres.h"
+
+/////////////////////////////////////////////////////////////////////////////
+#undef APSTUDIO_READONLY_SYMBOLS
+
+/////////////////////////////////////////////////////////////////////////////
+// English (U.S.) resources
+
+#if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_ENU)
+#ifdef _WIN32
+LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
+#pragma code_page(1252)
+#endif //_WIN32
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Dialog
+//
+
+CACHESET DIALOG DISCARDABLE  0, 0, 224, 118
+STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Cacheset - http://www.sysinternals.com"
+CLASS "Cacheset"
+FONT 8, "MS Sans Serif"
+BEGIN
+    EDITTEXT        IDC_MINIMUM,94,71,38,13,ES_AUTOHSCROLL
+    EDITTEXT        IDC_MAXIMUM,94,89,38,13,ES_AUTOHSCROLL
+    DEFPUSHBUTTON   "&Apply",IDAPPLY,167,7,50,14
+    PUSHBUTTON      "C&lear",IDCLEAR,167,24,50,14
+    PUSHBUTTON      "&Reset",IDDEFAULT,167,41,50,14
+    PUSHBUTTON      "&Cancel",IDCANCEL,167,58,50,14
+    LTEXT           "Static",IDC_CURRENT,94,20,45,8
+    LTEXT           "Static",IDC_PEAK,94,34,45,8
+    LTEXT           "Working set mi&numum",IDC_STATIC,16,73,70,8
+    LTEXT           "Working set ma&ximum",IDC_STATIC,16,91,70,8
+    GROUPBOX        "Adjust Cache Settings",IDC_STATIC,7,56,148,55
+    LTEXT           "Current size",IDC_STATIC,16,20,38,8
+    LTEXT           "Peak size",IDC_STATIC,16,34,32,8
+    GROUPBOX        "Cache Information",IDC_STATIC,7,7,147,46
+    LTEXT           "KB",IDC_STATIC,135,74,11,9
+    LTEXT           "KB",IDC_STATIC,135,92,11,9
+    CONTROL         "LOGO",IDC_STATIC,"Static",SS_BITMAP,168,86,15,13
+END
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// DESIGNINFO
+//
+
+#ifdef APSTUDIO_INVOKED
+GUIDELINES DESIGNINFO DISCARDABLE 
+BEGIN
+    "CACHESET", DIALOG
+    BEGIN
+        LEFTMARGIN, 7
+        RIGHTMARGIN, 217
+        TOPMARGIN, 7
+        BOTTOMMARGIN, 111
+    END
+END
+#endif    // APSTUDIO_INVOKED
+
+
+#ifdef APSTUDIO_INVOKED
+/////////////////////////////////////////////////////////////////////////////
+//
+// TEXTINCLUDE
+//
+
+1 TEXTINCLUDE DISCARDABLE 
+BEGIN
+    "resource.h\0"
+END
+
+2 TEXTINCLUDE DISCARDABLE 
+BEGIN
+    "#include ""afxres.h""\r\n"
+    "\0"
+END
+
+3 TEXTINCLUDE DISCARDABLE 
+BEGIN
+    "\r\n"
+    "\0"
+END
+
+#endif    // APSTUDIO_INVOKED
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Icon
+//
+
+// Icon with lowest ID value placed first to ensure application icon
+// remains consistent on all systems.
+APPICON                 ICON    DISCARDABLE     "icon1.ico"
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Bitmap
+//
+
+LOGO                    BITMAP  DISCARDABLE     "logo.bmp"
+#endif    // English (U.S.) resources
+/////////////////////////////////////////////////////////////////////////////
+
+
+
+#ifndef APSTUDIO_INVOKED
+/////////////////////////////////////////////////////////////////////////////
+//
+// Generated from the TEXTINCLUDE 3 resource.
+//
+
+
+/////////////////////////////////////////////////////////////////////////////
+#endif    // not APSTUDIO_INVOKED
+
