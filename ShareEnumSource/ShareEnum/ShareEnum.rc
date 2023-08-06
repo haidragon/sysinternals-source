@@ -1,0 +1,313 @@
+//Microsoft Developer Studio generated resource script.
+//
+#include "resource.h"
+
+#define APSTUDIO_READONLY_SYMBOLS
+/////////////////////////////////////////////////////////////////////////////
+//
+// Generated from the TEXTINCLUDE 2 resource.
+//
+#include "afxres.h"
+
+/////////////////////////////////////////////////////////////////////////////
+#undef APSTUDIO_READONLY_SYMBOLS
+
+/////////////////////////////////////////////////////////////////////////////
+// English (U.S.) resources
+
+#if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_ENU)
+#ifdef _WIN32
+LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
+#pragma code_page(1252)
+#endif //_WIN32
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Dialog
+//
+
+MAIN DIALOG DISCARDABLE  0, 0, 301, 153
+STYLE DS_NOFAILCREATE | DS_CENTER | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | 
+    WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
+CAPTION "ShareEnum - www.sysinternals.com"
+MENU MENU
+CLASS "ShareEnumClass"
+FONT 8, "MS Sans Serif"
+BEGIN
+    DEFPUSHBUTTON   "&Quit",IDOK,247,135,50,14
+    PUSHBUTTON      "&Refresh",IDC_REFRESH,4,135,50,14
+    CONTROL         "List1",IDC_LIST,"SysListView32",LVS_REPORT | 
+                    LVS_SINGLESEL | WS_BORDER | WS_TABSTOP,4,27,293,100
+    PUSHBUTTON      "E&xport...",IDC_EXPORT,120,135,50,14,WS_DISABLED
+    COMBOBOX        IDC_DOMAIN,155,5,123,255,CBS_DROPDOWNLIST | CBS_SORT | 
+                    WS_VSCROLL | WS_TABSTOP
+    PUSHBUTTON      "&Cancel",IDCANCEL,62,135,50,14,WS_DISABLED
+    LTEXT           "ShareEnum displays security information on all shares accessible within the selected domain.",
+                    IDC_DESCRIPTION,4,3,149,18
+    LTEXT           "213 requests pending...",IDC_STATUS,175,138,68,8
+END
+
+ABOUT DIALOG DISCARDABLE  0, 0, 197, 57
+STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "About ShareEnum"
+FONT 8, "MS Sans Serif"
+BEGIN
+    DEFPUSHBUTTON   "OK",IDOK,139,35,50,14
+    LTEXT           "ShareEnum 1.6",IDC_STATIC,47,7,73,8
+    LTEXT           "Copyright © 2002-2004",IDC_STATIC,47,16,104,8
+    LTEXT           "www.sysinternals.com",IDC_LINK,47,42,86,8
+    LTEXT           "Bryce Cogswell",IDC_STATIC,47,32,62,8
+    ICON            "APPICON",IDC_STATIC,7,7,20,20
+END
+
+ABORT DIALOG DISCARDABLE  0, 0, 185, 47
+STYLE DS_MODALFRAME | WS_POPUP | WS_VISIBLE | WS_CAPTION
+CAPTION "ShareEnum"
+FONT 8, "MS Sans Serif"
+BEGIN
+    LTEXT           "Scan cancelled by user.",IDC_STATIC,39,7,139,10
+    ICON            "APPICON",IDC_STATIC,7,7,21,20
+    LTEXT           "It may take several seconds for all outstanding network requests to complete...",
+                    IDC_STATIC,39,21,139,19
+END
+
+COMPARE DIALOG DISCARDABLE  0, 0, 256, 162
+STYLE DS_NOFAILCREATE | DS_CENTER | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | 
+    WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
+CAPTION "Compare Shares"
+FONT 8, "MS Sans Serif"
+BEGIN
+    DEFPUSHBUTTON   "OK",IDOK,202,144,50,14
+    LTEXT           "Changes to shares:",IDC_STATIC,4,0,178,8
+    LISTBOX         IDC_LIST,4,12,248,124,NOT LBS_NOTIFY | 
+                    LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP
+END
+
+IPRANGE DIALOG DISCARDABLE  0, 0, 202, 99
+STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "IP Address Range"
+FONT 8, "MS Sans Serif"
+BEGIN
+    DEFPUSHBUTTON   "OK",IDOK,89,78,50,14
+    PUSHBUTTON      "Cancel",IDCANCEL,145,78,50,14
+    CONTROL         "IPAddress1",IDC_FIRST,"SysIPAddress32",WS_TABSTOP,55,20,
+                    100,15
+    CONTROL         "IPAddress1",IDC_LAST,"SysIPAddress32",WS_TABSTOP,55,44,
+                    100,15
+    LTEXT           "First address:",IDC_STATIC,7,25,42,8
+    LTEXT           "Last address:",IDC_STATIC,7,47,43,8
+    LTEXT           "Specify a range of IP addresses to scan for shares:",
+                    IDC_STATIC,7,7,161,8
+END
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// DESIGNINFO
+//
+
+#ifdef APSTUDIO_INVOKED
+GUIDELINES DESIGNINFO DISCARDABLE 
+BEGIN
+    "MAIN", DIALOG
+    BEGIN
+        LEFTMARGIN, 4
+        RIGHTMARGIN, 297
+        TOPMARGIN, 3
+        BOTTOMMARGIN, 149
+    END
+
+    "ABOUT", DIALOG
+    BEGIN
+        LEFTMARGIN, 7
+        RIGHTMARGIN, 190
+        TOPMARGIN, 7
+        BOTTOMMARGIN, 50
+    END
+
+    "ABORT", DIALOG
+    BEGIN
+        LEFTMARGIN, 7
+        RIGHTMARGIN, 178
+        TOPMARGIN, 7
+        BOTTOMMARGIN, 40
+    END
+
+    "COMPARE", DIALOG
+    BEGIN
+        LEFTMARGIN, 4
+        RIGHTMARGIN, 252
+        BOTTOMMARGIN, 158
+    END
+
+    "IPRANGE", DIALOG
+    BEGIN
+        LEFTMARGIN, 7
+        RIGHTMARGIN, 195
+        TOPMARGIN, 7
+        BOTTOMMARGIN, 92
+    END
+END
+#endif    // APSTUDIO_INVOKED
+
+
+#ifdef APSTUDIO_INVOKED
+/////////////////////////////////////////////////////////////////////////////
+//
+// TEXTINCLUDE
+//
+
+1 TEXTINCLUDE DISCARDABLE 
+BEGIN
+    "resource.h\0"
+END
+
+2 TEXTINCLUDE DISCARDABLE 
+BEGIN
+    "#include ""afxres.h""\r\n"
+    "\0"
+END
+
+3 TEXTINCLUDE DISCARDABLE 
+BEGIN
+    "\r\n"
+    "\0"
+END
+
+#endif    // APSTUDIO_INVOKED
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Menu
+//
+
+MENU MENU DISCARDABLE 
+BEGIN
+    POPUP "&File"
+    BEGIN
+        MENUITEM "Compare to saved...",         IDC_COMPARE
+        MENUITEM "&Quit",                       IDOK
+    END
+    POPUP "&Help"
+    BEGIN
+        MENUITEM "&About...",                   IDC_ABOUT
+    END
+END
+
+POPUPMENU MENU DISCARDABLE 
+BEGIN
+    POPUP "Popup Menu"
+    BEGIN
+        MENUITEM "Properties",                  IDC_PROPERTIES
+        MENUITEM "Explore",                     IDC_EXPLORE
+    END
+END
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Icon
+//
+
+// Icon with lowest ID value placed first to ensure application icon
+// remains consistent on all systems.
+IDI_FILEBAD             ICON    DISCARDABLE     "res\\filebad.ico"
+APPICON                 ICON    DISCARDABLE     "appicon.ico"
+IDI_FILE                ICON    DISCARDABLE     "res\\file.ico"
+IDI_UPARROW             ICON    DISCARDABLE     "res\\uparrow.ico"
+IDI_DOWNARROW           ICON    DISCARDABLE     "res\\dnarrow.ico"
+IDI_FILEGOOD            ICON    DISCARDABLE     "res\\filegood.ico"
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Accelerator
+//
+
+ACCELERATORS ACCELERATORS DISCARDABLE 
+BEGIN
+    VK_F5,          IDC_REFRESH,            VIRTKEY, NOINVERT
+END
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Bitmap
+//
+
+IDB_BITMAP2             BITMAP  DISCARDABLE     "res\\bitmap2.bmp"
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Cursor
+//
+
+HAND                    CURSOR  DISCARDABLE     "cursor1.cur"
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// String Table
+//
+
+STRINGTABLE DISCARDABLE 
+BEGIN
+    1                       "1"
+    2                       "2"
+    3                       "3"
+    4                       "4"
+    5                       "5"
+    6                       "7"
+    7                       "7"
+    8                       "8"
+    9                       "9"
+    10                      "10"
+    11                      "11"
+    12                      "12"
+    13                      "13"
+    14                      "14"
+    15                      "15"
+END
+
+STRINGTABLE DISCARDABLE 
+BEGIN
+    16                      "16"
+    17                      "17"
+    18                      "18"
+    19                      "19"
+    20                      "20"
+    21                      "21"
+    22                      "22"
+    23                      "23"
+    24                      "24"
+    25                      "25"
+    26                      "26"
+    27                      "27"
+    28                      "28"
+    29                      "29"
+    30                      "30"
+    31                      "31"
+END
+
+STRINGTABLE DISCARDABLE 
+BEGIN
+    32                      "32"
+    IDS_CHANGE              "Change"
+    IDS_READ                "Read"
+    IDS_FULL_CONTROL        "Full Control"
+END
+
+#endif    // English (U.S.) resources
+/////////////////////////////////////////////////////////////////////////////
+
+
+
+#ifndef APSTUDIO_INVOKED
+/////////////////////////////////////////////////////////////////////////////
+//
+// Generated from the TEXTINCLUDE 3 resource.
+//
+
+
+/////////////////////////////////////////////////////////////////////////////
+#endif    // not APSTUDIO_INVOKED
+

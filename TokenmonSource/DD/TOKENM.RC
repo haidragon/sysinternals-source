@@ -1,0 +1,27 @@
+#include <windows.h>
+
+#define VER_DEBUG                   0
+#define VER_PRERELEASE              0
+#define VER_FILEFLAGSMASK           VS_FFI_FILEFLAGSMASK
+#define VER_FILEOS                  VOS_NT_WINDOWS32
+#define VER_FILEFLAGS               (VER_PRERELEASE|VER_DEBUG)
+
+#define VER_FILETYPE    VFT_DRV
+#define VER_FILESUBTYPE VFT2_DRV_SYSTEM
+
+#define VER_COMPANYNAME_STR         "Sysinternals - www.sysinternals.com"
+#define VER_PRODUCTNAME_STR         "Token Monitor for Windows NT/2000"
+#define VER_LEGALCOPYRIGHT_YEARS    "2000"
+#define VER_LEGALCOPYRIGHT_STR      "Copyright (C) M. Russinovich  " VER_LEGALCOPYRIGHT_YEARS
+#define VER_LEGALTRADEMARKS_STR     "Copyright (C) 2000 Mark Russinovich"
+
+#define VER_PRODUCTVERSION          1,01,00,00
+#define VER_PRODUCTVERSION_STR      "1.01"
+#define VER_PRODUCTVERSION_W        (0x0101)
+#define VER_PRODUCTVERSION_DW       (0x0101)
+#define VER_FILEDESCRIPTION_STR     "Windows NT/2000 Token Monitor"
+#define VER_INTERNALNAME_STR        "tokenm.sys"
+#define VER_ORIGINALFILENAME_STR    "tokenm.Sys"
+
+#include "common.ver"
+

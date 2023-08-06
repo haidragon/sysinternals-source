@@ -1,0 +1,296 @@
+//Microsoft Developer Studio generated resource script.
+//
+#include "resource.h"
+
+#define APSTUDIO_READONLY_SYMBOLS
+/////////////////////////////////////////////////////////////////////////////
+//
+// Generated from the TEXTINCLUDE 2 resource.
+//
+#define APSTUDIO_HIDDEN_SYMBOLS
+#include "windows.h"
+#undef APSTUDIO_HIDDEN_SYMBOLS
+
+/////////////////////////////////////////////////////////////////////////////
+#undef APSTUDIO_READONLY_SYMBOLS
+
+/////////////////////////////////////////////////////////////////////////////
+// English (U.S.) resources
+
+#if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_ENU)
+#ifdef _WIN32
+LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
+#pragma code_page(1252)
+#endif //_WIN32
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Icon
+//
+
+// Icon with lowest ID value placed first to ensure application icon
+// remains consistent on all systems.
+APPICON                 ICON    DISCARDABLE     "appicon.ICO"
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Menu
+//
+
+LISTMENU MENU DISCARDABLE 
+BEGIN
+    POPUP "&File"
+    BEGIN
+        MENUITEM "&Save\tCtrl+S",               IDM_SAVE
+        MENUITEM "Save &As...",                 IDM_SAVEAS
+        MENUITEM SEPARATOR
+        MENUITEM "E&xit\t",                     IDM_EXIT
+    END
+    POPUP "&Events"
+    BEGIN
+        MENUITEM "&Filter...\tCtrl+F",          IDM_FILTER
+        MENUITEM SEPARATOR
+        MENUITEM "&Time Duration\tCtrl+T",      IDM_TIME, CHECKED
+        MENUITEM "&Capture Events\tCtrl+E",     IDM_CAPTURE, CHECKED
+        MENUITEM "&Auto Scroll\tCtrl+A",        IDM_AUTOSCROLL, CHECKED
+        MENUITEM SEPARATOR
+        MENUITEM "C&lear Display\tCtrl+C",      IDM_CLEAR
+    END
+    POPUP "&Search"
+    BEGIN
+        MENUITEM "&Find...\tF3",                IDM_FIND
+    END
+    POPUP "&Help"
+    BEGIN
+        MENUITEM "&Help...",                    IDM_HELP
+        MENUITEM "&About",                      IDM_ABOUT
+    END
+END
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Dialog
+//
+
+ABOUTBOX DIALOG DISCARDABLE  160, 78, 213, 52
+STYLE DS_MODALFRAME | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU
+CAPTION "About Tokenmon"
+FONT 8, "MS Sans Serif"
+BEGIN
+    PUSHBUTTON      "OK",IDOK,155,31,47,12
+    CTEXT           "Token Monitor for Windows NT/2000 v1.0",IDC_STATIC,49,6,
+                    136,8
+    CTEXT           "Mark Russinovich",IDC_STATIC,49,26,58,8,NOT WS_GROUP
+    CTEXT           "Copyright © 2000",IDC_STATIC,49,16,56,8
+    ICON            "APPICON",IDC_STATIC,12,9,20,20
+    LTEXT           "http://www.sysinternals.com",IDC_STATIC,49,36,95,8
+END
+
+INITFILTER DIALOG DISCARDABLE  160, 78, 241, 89
+STYLE DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Tokenmon Filter"
+FONT 8, "MS Sans Serif"
+BEGIN
+    DEFPUSHBUTTON   "&Ok",IDOK,182,29,50,14
+    PUSHBUTTON      "&Reset",IDRESET,182,47,50,14
+    LTEXT           "These filters were active the last time you exited Tokenmon. The filter settings you configure will be active when monitoring starts.",
+                    IDC_STATIC,6,5,207,20
+    EDITTEXT        IDC_PROCFILTER,76,29,97,14,ES_AUTOHSCROLL
+    EDITTEXT        IDC_PROCEXCLUDE,76,46,97,14,ES_AUTOHSCROLL
+    EDITTEXT        IDC_HISTORY,76,64,28,14,ES_AUTOHSCROLL
+    LTEXT           "Process Include(s):",IDC_STATIC,7,31,61,8
+    LTEXT           "History Depth:",IDC_STATIC,7,66,45,8
+    LTEXT           "Process Exclude(s):",IDC_STATIC,7,48,63,8
+END
+
+FILTER DIALOG DISCARDABLE  160, 78, 237, 69
+STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Tokenmon Filter"
+FONT 8, "MS Sans Serif"
+BEGIN
+    EDITTEXT        IDC_PROCFILTER,75,8,97,14,ES_AUTOHSCROLL
+    EDITTEXT        IDC_PROCEXCLUDE,75,25,97,14,ES_AUTOHSCROLL
+    EDITTEXT        IDC_HISTORY,75,43,28,14,ES_AUTOHSCROLL
+    DEFPUSHBUTTON   "&Apply",IDOK,181,8,50,14
+    PUSHBUTTON      "&Reset",IDRESET,181,25,50,14
+    PUSHBUTTON      "&Cancel",IDCANCEL,181,42,50,14
+    LTEXT           "Process Include(s):",IDC_STATIC,6,10,61,8
+    LTEXT           "History Depth:",IDC_STATIC,6,45,45,8
+    LTEXT           "Process Exclude(s):",IDC_STATIC,6,27,63,8
+END
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// BINRES
+//
+
+RCBIN                   BINRES  MOVEABLE PURE   "..\\DD\\TOKENM.SYS"
+
+#ifdef APSTUDIO_INVOKED
+/////////////////////////////////////////////////////////////////////////////
+//
+// TEXTINCLUDE
+//
+
+1 TEXTINCLUDE DISCARDABLE 
+BEGIN
+    "resource.h\0"
+END
+
+2 TEXTINCLUDE DISCARDABLE 
+BEGIN
+    "#define APSTUDIO_HIDDEN_SYMBOLS\r\n"
+    "#include ""windows.h""\r\n"
+    "#undef APSTUDIO_HIDDEN_SYMBOLS\r\n"
+    "\0"
+END
+
+3 TEXTINCLUDE DISCARDABLE 
+BEGIN
+    "\r\n"
+    "\0"
+END
+
+#endif    // APSTUDIO_INVOKED
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// DESIGNINFO
+//
+
+#ifdef APSTUDIO_INVOKED
+GUIDELINES DESIGNINFO DISCARDABLE 
+BEGIN
+    "ABOUTBOX", DIALOG
+    BEGIN
+        RIGHTMARGIN, 202
+        BOTTOMMARGIN, 51
+    END
+
+    "INITFILTER", DIALOG
+    BEGIN
+        LEFTMARGIN, 7
+        RIGHTMARGIN, 234
+        TOPMARGIN, 7
+        BOTTOMMARGIN, 82
+    END
+
+    "FILTER", DIALOG
+    BEGIN
+        LEFTMARGIN, 7
+        RIGHTMARGIN, 230
+        TOPMARGIN, 7
+        BOTTOMMARGIN, 62
+    END
+END
+#endif    // APSTUDIO_INVOKED
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Accelerator
+//
+
+ACCELERATORS ACCELERATORS DISCARDABLE 
+BEGIN
+    "A",            IDM_AUTOSCROLL,         VIRTKEY, CONTROL, NOINVERT
+    "C",            IDM_CLEAR,              VIRTKEY, CONTROL, NOINVERT
+    "E",            IDM_CAPTURE,            VIRTKEY, CONTROL, NOINVERT
+    "F",            IDM_FILTER,             VIRTKEY, CONTROL, NOINVERT
+    "S",            IDM_SAVE,               VIRTKEY, CONTROL, NOINVERT
+    "T",            IDM_TIME,               VIRTKEY, CONTROL, NOINVERT
+    VK_F3,          IDM_FIND,               VIRTKEY, NOINVERT
+END
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Bitmap
+//
+
+IDB_TOOLBAR             BITMAP  DISCARDABLE     "toolbar1.bmp"
+
+#ifndef _MAC
+/////////////////////////////////////////////////////////////////////////////
+//
+// Version
+//
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 1,0,0,0
+ PRODUCTVERSION 1,0,0,0
+ FILEFLAGSMASK 0x3fL
+#ifdef _DEBUG
+ FILEFLAGS 0x1L
+#else
+ FILEFLAGS 0x0L
+#endif
+ FILEOS 0x40004L
+ FILETYPE 0x1L
+ FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "Comments", "\0"
+            VALUE "CompanyName", "Sysinternals\0"
+            VALUE "FileDescription", "Tokenmon for Windows NT/2000\0"
+            VALUE "FileVersion", "1.0\0"
+            VALUE "InternalName", "Tokenmon\0"
+            VALUE "LegalCopyright", "Copyright © 2000 Mark Russinovich\0"
+            VALUE "LegalTrademarks", "\0"
+            VALUE "OriginalFilename", "Tokenmon.exe\0"
+            VALUE "PrivateBuild", "\0"
+            VALUE "ProductName", "Sysinternals Tokenmon\0"
+            VALUE "ProductVersion", "1.0\0"
+            VALUE "SpecialBuild", "\0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END
+
+#endif    // !_MAC
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// String Table
+//
+
+STRINGTABLE DISCARDABLE 
+BEGIN
+    IDM_CAPTURE             "Capture (Ctrl+E)"
+    IDM_AUTOSCROLL          "Autoscroll (Ctrl+A)"
+    IDM_CLEAR               "Clear (Ctrl+C)"
+    IDM_FILTER              "Filter (Ctrl+F)"
+    IDM_FIND                "Find (F3)"
+    IDM_TIME                "Duration/Clock (Ctrl+T)"
+END
+
+STRINGTABLE DISCARDABLE 
+BEGIN
+    IDM_SAVE                "Save (Ctrl+S)"
+END
+
+#endif    // English (U.S.) resources
+/////////////////////////////////////////////////////////////////////////////
+
+
+
+#ifndef APSTUDIO_INVOKED
+/////////////////////////////////////////////////////////////////////////////
+//
+// Generated from the TEXTINCLUDE 3 resource.
+//
+
+
+/////////////////////////////////////////////////////////////////////////////
+#endif    // not APSTUDIO_INVOKED
+

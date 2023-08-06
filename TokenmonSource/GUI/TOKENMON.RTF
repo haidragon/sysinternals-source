@@ -1,0 +1,88 @@
+{\rtf1\ansi\ansicpg1252\uc1 \deff0\deflang1033\deflangfe1033{\fonttbl{\f0\froman\fcharset0\fprq2{\*\panose 02020603050405020304}Times New Roman;}{\f1\fswiss\fcharset0\fprq2{\*\panose 020b0604020202020204}Arial;}
+{\f16\fswiss\fcharset0\fprq2{\*\panose 00000000000000000000}Univers{\*\falt Arial};}{\f37\froman\fcharset238\fprq2 Times New Roman CE;}{\f38\froman\fcharset204\fprq2 Times New Roman Cyr;}{\f40\froman\fcharset161\fprq2 Times New Roman Greek;}
+{\f41\froman\fcharset162\fprq2 Times New Roman Tur;}{\f42\froman\fcharset186\fprq2 Times New Roman Baltic;}{\f43\fswiss\fcharset238\fprq2 Arial CE;}{\f44\fswiss\fcharset204\fprq2 Arial Cyr;}{\f46\fswiss\fcharset161\fprq2 Arial Greek;}
+{\f47\fswiss\fcharset162\fprq2 Arial Tur;}{\f48\fswiss\fcharset186\fprq2 Arial Baltic;}}{\colortbl;\red0\green0\blue0;\red0\green0\blue255;\red0\green255\blue255;\red0\green255\blue0;\red255\green0\blue255;\red255\green0\blue0;\red255\green255\blue0;
+\red255\green255\blue255;\red0\green0\blue128;\red0\green128\blue128;\red0\green128\blue0;\red128\green0\blue128;\red128\green0\blue0;\red128\green128\blue0;\red128\green128\blue128;\red192\green192\blue192;}{\stylesheet{\widctlpar\adjustright \fs20 
+\snext0 Normal;}{\s1\keepn\widctlpar\outlinelevel0\adjustright \b\f1\fs20\cf2 \sbasedon0 \snext0 heading 1;}{\*\cs10 \additive Default Paragraph Font;}{\s15\li2\ri2\sb80\nowidctlpar\adjustright \f16\fs20 \sbasedon0 \snext15 footnote text;}{\*\cs16 
+\additive \super \sbasedon10 footnote reference;}{\*\cs17 \additive \ul\cf2 \sbasedon10 Hyperlink;}}{\info{\title NTFilemon}{\author Preferred Customer}{\operator Mark Russinovich}{\creatim\yr1997\mo7\dy11\hr9\min43}{\revtim\yr1998\mo10\dy23\hr9\min22}
+{\version48}{\edmins20}{\nofpages2}{\nofwords690}{\nofchars3936}{\*\company Micron Electronics, Inc.}{\nofcharsws4833}{\vern89}}\widowctrl\ftnbj\aenddoc\hyphcaps0\formshade\viewkind4\viewscale100 \fet0\sectd \linex0\endnhere\sectdefaultcl {\*\pnseclvl1
+\pnucrm\pnstart1\pnindent720\pnhang{\pntxta .}}{\*\pnseclvl2\pnucltr\pnstart1\pnindent720\pnhang{\pntxta .}}{\*\pnseclvl3\pndec\pnstart1\pnindent720\pnhang{\pntxta .}}{\*\pnseclvl4\pnlcltr\pnstart1\pnindent720\pnhang{\pntxta )}}{\*\pnseclvl5
+\pndec\pnstart1\pnindent720\pnhang{\pntxtb (}{\pntxta )}}{\*\pnseclvl6\pnlcltr\pnstart1\pnindent720\pnhang{\pntxtb (}{\pntxta )}}{\*\pnseclvl7\pnlcrm\pnstart1\pnindent720\pnhang{\pntxtb (}{\pntxta )}}{\*\pnseclvl8\pnlcltr\pnstart1\pnindent720\pnhang
+{\pntxtb (}{\pntxta )}}{\*\pnseclvl9\pnlcrm\pnstart1\pnindent720\pnhang{\pntxtb (}{\pntxta )}}\pard\plain \widctlpar\adjustright \fs20 {\cs16\super ${\footnote \pard\plain \s15\li2\ri2\sb80\widctlpar\adjustright \f16\fs20 {\cs16\super $}{ NTRegmon Help}}#
+{\footnote \pard\plain \s15\li2\ri2\sb80\widctlpar\adjustright \f16\fs20 {\cs16\super #}{ INTRO}}}{
+\par }{\b\i\f1\fs36\cf2 Portmon for Windows NT}{\f1 
+\par }{\b\f1 Copyright \'a9 1998 Mark Russinovich
+\par http://www.sysinternals.com}{\f1 
+\par 
+\par }{\b\f1\cf2 Introduction}{\f1 
+\par 
+\par }{\i\f1 Portmon}{\f1  is a GUI/device driver combination that together monitor and display all serial and parallel port activity on a system. It has advanced filtering
+ and search capabilities that make it a powerful tool for exploring the way NT works, seeing how applications use ports, or tracking down problems in system or application configurations. 
+\par 
+\par }{\i\f1 Portmon}{\f1  works on NT 4.0.
+\par 
+\par }{\b\f1\cf2 Starting Portmon}{\f1 
+\par 
+\par Simply run the }{\i\f1 Portmon}{\f1  GUI (portmon.exe) from the same directory that the driver (Portm.sys) resides in. }{\i\f1 Note that it must be located on a non-network drive and that you must have administrative privilege to run Portmon}{\f1 . When }
+{\i\f1 Portmon}{\f1  is started for the first time it will monito
+r all serial and parallel. Menus, hot-keys, or toolbar buttons can be used to clear the window, select and deselect monitored ports, save the monitored data to a file, and to filter and search output. 
+\par 
+\par As events are printed to the output, they are tagged with a sequence number. If }{\i\f1 Portmon\rquote s }{\f1  internal buffers are overflowed during extremely heavy activity, this will be reflected with gaps in the sequence number.
+\par 
+\par Each time you exit }{\i\f1 Portmon}{\f1  it remembers the position of the window and the widths of the output columns.
+\par 
+\par }\pard\plain \s1\keepn\widctlpar\outlinelevel0\adjustright \b\f1\fs20\cf2 {Selecting Ports
+\par }\pard\plain \widctlpar\adjustright \fs20 {\f1 
+\par The Ports menu can be used to select and deselect monitored ports. In the menu you will see the DOS name that NT has given to the port as well as the corresponding name of the device object that represents the port. For example,
+ if the DOS device name COM1 were mapped to the device object \\device\\serial0 the menu item would be \ldblquote COM1: Serial0\rdblquote 
+. Output that displays monitored activity to this port would refer to Serial0. Ports that have no DOS name are not shown in the menu.
+\par 
+\par In some cases you may not be able to monitor a particular serial or parallel port. Because ports are exclusive devices, if an application or driver has already opened the port }{\i\f1 Portmon}{\f1 
+ will be unable to open it, and therefore not be able to monitor it.
+\par 
+\par }\pard\plain \s1\keepn\widctlpar\outlinelevel0\adjustright \b\f1\fs20\cf2 {Viewing the Output
+\par }\pard\plain \widctlpar\adjustright \fs20 {
+\par }{\i\f1 Portmon}{\f1  understands all serial and parallel port I/O control (IOCTLs) commands and will display them along with interesting information regarding their associated parameters. For read and write requests }{\i\f1 Portmon}{\f1 
+ displays the first 48 bytes of the buffer, using \lquote .\rquote  to represent non-printable characters.}{
+\par }{\f1 
+\par }{\b\f1\cf2 Filtering Output}{\f1 
+\par 
+\par Use the Filter dialog to select what data will be shown in the list view. The \lquote *\rquote  wildcard matches arbitrary strings, and the filters are case-insensitive.  Only matches shown in the process include filter, but that are not exc
+luded with the process exclude filter, are displayed. Use \lquote ;\rquote  to separate multiple strings in a filter (e.g. \ldblquote *Portmon*;*Explorer*\rdblquote ). 
+\par 
+\par }{\b\f1\cf2 Limiting Output}{\f1 
+\par 
+\par The History Depth entry in the Filter dialog allows you to specify the maximum number of lines that will be remembered in the output window. Use a depth of 0 to signify no limit.
+\par 
+\par }{\b\f1\cf2 Searching the Output}{\f1 
+\par 
+\par You can search the output window for strings using the Find menu item (or the find toolbar button). Once you have opened a Find dialog and hit the FindNext b
+utton, you can repeat the search without changing the focus back to the Find dialog by hitting the F3 key.
+\par 
+\par To start a search at a particular line in the output, select the desired line by clicking on the far left column (the index number). If no line is selected a new search starts at the first entry in searching down, and at the last entry for searching up.
+
+\par 
+\par }\pard\plain \s1\keepn\widctlpar\outlinelevel0\adjustright \b\f1\fs20\cf2 {Time Settings
+\par }\pard\plain \widctlpar\adjustright \fs20 {\f1 
+\par }{\i\f1 Portmon}{\f1  can either timestamp events or show their duration. The Events menu and the clock toolbar button let you toggle between the tw
+o modes. The button on the toolbar shows the current mode with a clock or a stopwatch. When showing duration the Time field in the output shows the number of seconds it took for the underlying file system to service particular requests.
+\par 
+\par }\pard\plain \s1\keepn\widctlpar\outlinelevel0\adjustright \b\f1\fs20\cf2 {Viewing Partially Obscured Fields
+\par }\pard\plain \widctlpar\adjustright \fs20 {\f1 
+\par Fields within a row in }{\i\f1 Portmon\rquote s}{\f1  output may be partially hidden if the field\rquote s column is not wide enough to fully display the field\rquote s text. If you have a newer version of the Microsoft\rquote 
+s common control dialog DLL then hovering the mouse ov
+er an obscured field will cause a tool-tip with the contents of the field to be displayed. If this does not occur, try right-clicking on the field. With old versions of the common control DLLs the only way to reveal an obscured field is to make its column
+ wider.
+\par 
+\par }\pard\plain \s1\keepn\widctlpar\outlinelevel0\adjustright \b\f1\fs20\cf2 {Controlling Output Width
+\par }\pard\plain \widctlpar\adjustright \fs20 {\f1 
+\par You can completely close a column by making it have no width and then open it by dragging its separator, which will still be accessible. This is useful for temporarily removing columns that are not of interest.
+\par }\pard \fi-720\li720\widctlpar\adjustright {\f1 
+\par }\pard \widctlpar\adjustright {\b\f1\cf2 Reporting Bugs and Feedback}{\f1 
+\par 
+\par If you encounter a problem while running }{\i\f1 Portmon}{\f1 , please visit http://www.sysinternals.com to obtain the latest version. If you still have problems, please record all the information in the top few lines of a Blue Screen, as well as the 
+section of addresses and driver names just above the administrative message. Determine if the problem is reproducible, and if so, how, and send this information to:
+\par 
+\par }\pard \li720\widctlpar\adjustright {\f1 mark@sysinternals.com 
+\par }\pard \widctlpar\adjustright {
+\par }}

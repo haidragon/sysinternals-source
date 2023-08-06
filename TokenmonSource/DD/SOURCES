@@ -1,0 +1,8 @@
+TARGETNAME=tokenm
+TARGETPATH=$(BASEDIR)\lib
+TARGETTYPE=DRIVER
+INCLUDES=$(BASEDIR)\src\comm\inc
+
+TARGETLIBS=ksecdd.lib
+
+SOURCES=tokenm.c tokenm.rc 
