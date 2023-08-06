@@ -1,0 +1,368 @@
+//Microsoft Developer Studio generated resource script.
+//
+#include "resource.h"
+
+#define APSTUDIO_READONLY_SYMBOLS
+/////////////////////////////////////////////////////////////////////////////
+//
+// Generated from the TEXTINCLUDE 2 resource.
+//
+#include "afxres.h"
+
+/////////////////////////////////////////////////////////////////////////////
+#undef APSTUDIO_READONLY_SYMBOLS
+
+/////////////////////////////////////////////////////////////////////////////
+// English (U.S.) resources
+
+#if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_ENU)
+#ifdef _WIN32
+LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
+#pragma code_page(1252)
+#endif //_WIN32
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// DESIGNINFO
+//
+
+#ifdef APSTUDIO_INVOKED
+GUIDELINES DESIGNINFO DISCARDABLE 
+BEGIN
+    "ABOUT", DIALOG
+    BEGIN
+        LEFTMARGIN, 7
+        RIGHTMARGIN, 224
+        TOPMARGIN, 7
+        BOTTOMMARGIN, 51
+    END
+
+    "PAGE_WELCOME", DIALOG
+    BEGIN
+        LEFTMARGIN, 7
+        RIGHTMARGIN, 233
+        TOPMARGIN, 7
+        BOTTOMMARGIN, 119
+    END
+
+    "WIZARD", DIALOG
+    BEGIN
+        RIGHTMARGIN, 345
+        VERTGUIDE, 7
+        VERTGUIDE, 14
+        VERTGUIDE, 30
+        VERTGUIDE, 331
+        TOPMARGIN, 7
+        BOTTOMMARGIN, 192
+        HORZGUIDE, 37
+    END
+
+    "PAGE_FINISHED", DIALOG
+    BEGIN
+        LEFTMARGIN, 7
+        RIGHTMARGIN, 228
+        TOPMARGIN, 7
+        BOTTOMMARGIN, 119
+    END
+
+    "PAGE_CHOOSESID", DIALOG
+    BEGIN
+        LEFTMARGIN, 7
+        RIGHTMARGIN, 324
+        TOPMARGIN, 7
+        BOTTOMMARGIN, 119
+    END
+
+    "PAGE_RENAMECOMPUTER", DIALOG
+    BEGIN
+        LEFTMARGIN, 7
+        RIGHTMARGIN, 324
+        TOPMARGIN, 7
+        BOTTOMMARGIN, 119
+    END
+
+    "APPLYINGGSID", DIALOG
+    BEGIN
+        LEFTMARGIN, 7
+        RIGHTMARGIN, 219
+        TOPMARGIN, 7
+        BOTTOMMARGIN, 39
+    END
+
+    "GENERATINGSID", DIALOG
+    BEGIN
+        LEFTMARGIN, 7
+        RIGHTMARGIN, 202
+        TOPMARGIN, 7
+        BOTTOMMARGIN, 47
+    END
+
+    "PAGE_READY", DIALOG
+    BEGIN
+        LEFTMARGIN, 7
+        RIGHTMARGIN, 324
+        TOPMARGIN, 7
+        BOTTOMMARGIN, 119
+    END
+END
+#endif    // APSTUDIO_INVOKED
+
+
+#ifdef APSTUDIO_INVOKED
+/////////////////////////////////////////////////////////////////////////////
+//
+// TEXTINCLUDE
+//
+
+1 TEXTINCLUDE DISCARDABLE 
+BEGIN
+    "resource.h\0"
+END
+
+2 TEXTINCLUDE DISCARDABLE 
+BEGIN
+    "#include ""afxres.h""\r\n"
+    "\0"
+END
+
+3 TEXTINCLUDE DISCARDABLE 
+BEGIN
+    "\r\n"
+    "\0"
+END
+
+#endif    // APSTUDIO_INVOKED
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Bitmap
+//
+
+WATERMARK               BITMAP  DISCARDABLE     "watermrk.bmp"
+BANNER                  BITMAP  DISCARDABLE     "banner.bmp"
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Dialog
+//
+
+ABOUT DIALOG DISCARDABLE  0, 0, 231, 58
+STYLE DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "About NewSID"
+FONT 8, "Ms Shell Dlg"
+BEGIN
+    DEFPUSHBUTTON   "OK",IDOK,173,35,50,14
+    LTEXT           "NewSID v4.10",IDC_STATIC,40,8,48,8
+    LTEXT           "Copyright © 1998-2005",IDC_STATIC,40,19,74,8
+    LTEXT           "www.sysinternals.com",IDC_LINK,40,41,70,8
+    ICON            "APPICON",IDC_STATIC,8,8,20,20
+    LTEXT           "Mark Russinovich and Bryce Cogswell",IDC_STATIC,40,30,
+                    122,8
+END
+
+PAGE_WELCOME DIALOGEX 0, 0, 240, 126
+STYLE WS_CHILD
+EXSTYLE WS_EX_CONTROLPARENT
+FONT 8, "Ms Shell Dlg", 0, 0, 0x1
+BEGIN
+    LTEXT           "The NewSID wizard guides you through the process of applying a new machine SID to a computer and optionally changing the computer's name. ",
+                    IDC_STATIC,8,0,226,32
+    PUSHBUTTON      "&About...",IDC_ABOUT,168,103,50,14
+    LTEXT           "You can direct NewSID to randomly generate a new SID, manually enter one, or have it copy one from another computer.",
+                    IDC_STATIC,8,34,223,17
+    ICON            IDI_ICON2,IDC_STATIC,9,55,20,20,SS_REALSIZEIMAGE
+    LTEXT           "Please backup your system before running NewSID.",
+                    IDC_STATIC,25,60,188,10
+END
+
+WIZARD DIALOGEX 0, 0, 346, 199
+STYLE DS_MODALFRAME | DS_CENTER | WS_MINIMIZEBOX | WS_POPUP | WS_VISIBLE | 
+    WS_CLIPCHILDREN | WS_CAPTION | WS_SYSMENU
+CAPTION "NewSID - Sysinternals: www.sysinternals.com"
+CLASS "WizardClass"
+FONT 8, "Ms Shell Dlg", 0, 0, 0x1
+BEGIN
+    PUSHBUTTON      "< &Back",IDC_BACK,173,178,50,14
+    DEFPUSHBUTTON   "&Next >",IDOK,223,178,50,14
+    PUSHBUTTON      "&Cancel",IDCANCEL,281,178,50,14
+    CONTROL         "WATERMARK",IDC_WATERMARK,"Static",SS_BITMAP,0,0,15,13
+    LTEXT           "Title",IDC_TITLE,14,7,270,8
+    LTEXT           "Subtitle and description.",IDC_SUBTITLE,30,16,249,21
+    LTEXT           "External Title",IDC_EXTTITLE,113,7,192,24
+    CONTROL         "BANNER",IDC_BANNER,"Static",SS_BITMAP,309,3,15,13
+    CONTROL         "",IDC_UPPERLINE,"Static",SS_BLACKFRAME | SS_SUNKEN,0,37,
+                    345,1
+    CONTROL         "",IDC_PAGEFRAME,"Static",SS_BLACKFRAME | NOT WS_VISIBLE,
+                    7,38,331,126,WS_EX_TRANSPARENT
+    CONTROL         "",IDC_EXTPAGEFRAME,"Static",SS_BLACKFRAME | NOT 
+                    WS_VISIBLE,105,38,233,126
+    CONTROL         "",IDC_STATIC,"Static",SS_BLACKFRAME | SS_SUNKEN,0,167,
+                    345,1
+END
+
+PAGE_FINISHED DIALOG DISCARDABLE  0, 0, 235, 126
+STYLE WS_CHILD
+FONT 8, "Ms Shell Dlg"
+BEGIN
+    LTEXT           "NewSID has finished applying the specified SID to this computer.",
+                    IDC_STATIC,7,0,221,11
+    LTEXT           "Press Finish to reboot the computer.",IDC_FINISHTEXT,7,
+                    22,114,8
+END
+
+PAGE_CHOOSESID DIALOG DISCARDABLE  0, 0, 331, 126
+STYLE WS_CHILD
+FONT 8, "Ms Shell Dlg"
+BEGIN
+    CONTROL         "&Random SID",IDC_RANDOM,"Button",BS_AUTORADIOBUTTON | 
+                    BS_NOTIFY | WS_GROUP,18,38,57,10
+    CONTROL         "&Copy SID from another computer:",IDC_COPY,"Button",
+                    BS_AUTORADIOBUTTON | BS_NOTIFY | WS_TABSTOP,18,54,121,10
+    CONTROL         "&Specify SID:",IDC_SPECIFIC,"Button",BS_AUTORADIOBUTTON | 
+                    BS_NOTIFY | WS_TABSTOP,18,85,55,10
+    LTEXT           "Choose from the following the source of the SID that NewSID will apply to this computer:",
+                    IDC_STATIC,8,5,300,11
+    EDITTEXT        IDC_SID,32,98,190,12,ES_AUTOHSCROLL | WS_DISABLED
+    EDITTEXT        IDC_COMPUTER,31,67,91,12,ES_AUTOHSCROLL | WS_DISABLED
+    PUSHBUTTON      "&...",IDC_BROWSE,123,68,14,12,WS_DISABLED
+    LTEXT           "Current SID:",IDC_STATIC,19,23,40,8
+    LTEXT           "Static",IDC_CURSID,61,23,158,8
+END
+
+PAGE_RENAMECOMPUTER DIALOG DISCARDABLE  0, 0, 331, 126
+STYLE WS_CHILD
+FONT 8, "Ms Shell Dlg"
+BEGIN
+    LTEXT           "Specify a new name for this computer if you wish to rename it:",
+                    IDC_STATIC,8,5,226,12
+    CONTROL         "&Rename the computer to:",IDC_CHECKRENAME,"Button",
+                    BS_AUTOCHECKBOX | BS_NOTIFY | WS_TABSTOP,19,34,94,10
+    EDITTEXT        IDC_COMPUTERNAME,114,33,90,12,ES_AUTOHSCROLL | 
+                    WS_DISABLED
+    LTEXT           "Current name: ",IDC_STATIC,19,21,47,8
+    LTEXT           "Static",IDC_CURNAME,70,21,121,8
+END
+
+APPLYINGGSID DIALOG DISCARDABLE  65, 50, 226, 46
+STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION
+CAPTION "Applying SID..."
+FONT 8, "MS Sans Serif"
+BEGIN
+    LTEXT           "Static",IDC_OPERATION,7,7,155,8
+    LTEXT           "Static",IDC_PATHNAME,8,26,207,8
+END
+
+GENERATINGSID DIALOG DISCARDABLE  80, 50, 209, 54
+STYLE DS_MODALFRAME | WS_POPUP | WS_VISIBLE | WS_CAPTION
+CAPTION "Generating SID..."
+FONT 8, "MS Sans Serif"
+BEGIN
+    LTEXT           "NewSID is generating a random SID to apply to this computer.",
+                    IDC_STATIC,7,9,196,8
+    CONTROL         "Progress1",IDC_RANDOMPROGRESS,"msctls_progress32",
+                    WS_BORDER,8,28,195,12
+END
+
+PAGE_READY DIALOG DISCARDABLE  0, 0, 331, 126
+STYLE WS_CHILD
+FONT 8, "Ms Shell Dlg"
+BEGIN
+    LTEXT           "The current SID of this computer is:",IDC_STATIC,8,5,
+                    114,8
+    LTEXT           "Static",IDC_CURRENTSID,33,19,226,8
+    LTEXT           "The SID that will be applied is:",IDC_STATIC,8,33,114,8
+    LTEXT           "Static",IDC_NEWSID,34,47,226,8
+    LTEXT           "Static",IDC_RENAME,8,63,279,8
+    LTEXT           "Terminating NewSID while the SID is being applied will lead to an unstable system.",
+                    IDC_STATIC,22,107,267,13
+    ICON            IDI_ICON2,IDC_STATIC,9,100,20,20,SS_REALSIZEIMAGE
+    CONTROL         "&Automatically reboot after SID is applied",IDC_REBOOT,
+                    "Button",BS_AUTOCHECKBOX | WS_TABSTOP,8,81,145,10
+END
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Cursor
+//
+
+HAND                    CURSOR  DISCARDABLE     "cursor1.cur"
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// 24
+//
+
+1                       24      MOVEABLE PURE   "Newsid.exe.manifest"
+
+#ifndef _MAC
+/////////////////////////////////////////////////////////////////////////////
+//
+// Version
+//
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 4,10,0,0
+ PRODUCTVERSION 4,10,0,0
+ FILEFLAGSMASK 0x3fL
+#ifdef _DEBUG
+ FILEFLAGS 0x1L
+#else
+ FILEFLAGS 0x0L
+#endif
+ FILEOS 0x40004L
+ FILETYPE 0x1L
+ FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "Comments", "\0"
+            VALUE "CompanyName", "Sysinternals\0"
+            VALUE "FileDescription", "NewSID Sid Generator\0"
+            VALUE "FileVersion", "4.10\0"
+            VALUE "InternalName", "NewSID\0"
+            VALUE "LegalCopyright", "Copyright © 1998-2005 Mark Russinovich and Bryce Cogswell\0"
+            VALUE "LegalTrademarks", "\0"
+            VALUE "OriginalFilename", "NewSID.exe\0"
+            VALUE "PrivateBuild", "\0"
+            VALUE "ProductName", "NewSID\0"
+            VALUE "ProductVersion", "4.10\0"
+            VALUE "SpecialBuild", "\0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END
+
+#endif    // !_MAC
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Icon
+//
+
+// Icon with lowest ID value placed first to ensure application icon
+// remains consistent on all systems.
+IDI_ICON2               ICON    DISCARDABLE     "ico00001.ico"
+APPICON                 ICON    DISCARDABLE     "icon1.ico"
+#endif    // English (U.S.) resources
+/////////////////////////////////////////////////////////////////////////////
+
+
+
+#ifndef APSTUDIO_INVOKED
+/////////////////////////////////////////////////////////////////////////////
+//
+// Generated from the TEXTINCLUDE 3 resource.
+//
+
+
+/////////////////////////////////////////////////////////////////////////////
+#endif    // not APSTUDIO_INVOKED
+

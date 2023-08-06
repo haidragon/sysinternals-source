@@ -1,0 +1,444 @@
+//----------------------------------------------------------------------
+//
+// NewSID
+//
+// Copyright (c) 1997-2002 Mark Russinovich and Bryce Cogswell
+//
+// File system-related functions.
+//
+//----------------------------------------------------------------------
+#include <windows.h>
+#include <lm.h>
+#include <commctrl.h>
+#include <stdio.h>
+#include <tchar.h>
+#include <shlobj.h>
+#include <aclapi.h>
+#include <process.h>
+#include "resource.h"
+#include "wizard.h"
+#include "sid.h"
+
+//----------------------------------------------------------------------
+//
+// CheckFileOwnershipForSID
+//
+// Sees if the file ownership SID contains the old computer SID, and
+// if so, replaces it.
+//
+//----------------------------------------------------------------------
+void CheckFileOwnershipForSID(PSECURITY_DESCRIPTOR psdFileSD, 
+							  LPTSTR  lpszFullName)
+{
+	PSID		psidFileOwnerSID;
+	PSID		psidFileGroupSID;
+	BOOL		bOwnerDefaulted;
+
+	//
+	// Get the owner SID
+	//
+	if (!GetSecurityDescriptorOwner(psdFileSD,
+		(PSID *)&psidFileOwnerSID, (LPBOOL)&bOwnerDefaulted)) { 
+
+		return;
+	}
+
+	//
+	// If the old SID is in the owner, we have to write
+	// the updated owner to disk
+	//
+    if( SecurityReplaceSID( psidFileOwnerSID) ) {
+		if (!SetFileSecurity(lpszFullName,
+            (SECURITY_INFORMATION)OWNER_SECURITY_INFORMATION,
+            psdFileSD)){
+			
+			return;
+		}
+    }
+
+	//
+	// Now do the same with the Group SID
+	//
+	if (!GetSecurityDescriptorGroup(psdFileSD,
+		(PSID *)&psidFileGroupSID, (LPBOOL)&bOwnerDefaulted)) { 
+
+		return;
+	}
+
+	//
+	// If the old SID is in the owner, we have to write
+	// the updated owner to disk
+	//
+    if( SecurityReplaceSID( psidFileGroupSID) ) {
+		if (!SetFileSecurity(lpszFullName,
+            (SECURITY_INFORMATION)GROUP_SECURITY_INFORMATION,
+            psdFileSD)){
+			
+			return;
+		}
+    }
+	return;
+}
+
+
+
+//----------------------------------------------------------------------
+//
+// CheckACLForSID
+//
+// Scan's the security descriptor's ACEs, looking for instances
+// of the old computer SID.
+//
+//----------------------------------------------------------------------
+void CheckFileACLForSID( BOOLEAN Dacl, PSECURITY_DESCRIPTOR psdFileSD,
+                             LPTSTR  lpszFullName)
+{
+	PACL       paclFile;
+	BOOL       bHasACL;
+	BOOL       bOwnerDefaulted;
+	DWORD      dwAcl_i;
+	BOOLEAN    descriptorModified;
+	DWORD      dwLastError   = NO_ERROR;
+	ACL_SIZE_INFORMATION asiAclSize;
+	DWORD      dwBufLength = sizeof(asiAclSize);
+	ACCESS_ALLOWED_ACE   *paaAllowedAce;
+
+	if( Dacl ) {
+		if (!GetSecurityDescriptorDacl(psdFileSD,
+							 (LPBOOL)&bHasACL, (PACL *)&paclFile,
+							 (LPBOOL)&bOwnerDefaulted)) {
+			return;
+		}
+	} else {
+		if (!GetSecurityDescriptorSacl(psdFileSD,
+							 (LPBOOL)&bHasACL, (PACL *)&paclFile,
+							 (LPBOOL)&bOwnerDefaulted)) {
+			return;
+		}
+	}
+
+	//
+	// If no ACL to process, so OK, return
+	//
+	if (!bHasACL || !paclFile ) {
+
+		return;
+	}
+
+	if (!GetAclInformation(paclFile, (LPVOID)&asiAclSize,
+				 (DWORD)dwBufLength, (ACL_INFORMATION_CLASS)AclSizeInformation)){
+		return;
+	}
+	descriptorModified = FALSE;
+
+	// 
+	// Look through the ACEs
+	//
+	for (dwAcl_i = asiAclSize.AceCount-1;  ((int)dwAcl_i) >= 0;  dwAcl_i--) {
+
+		//
+		// If we can't get an ACE, bail
+		//
+		if (!GetAce(paclFile, dwAcl_i, (LPVOID *)&paaAllowedAce)) {
+
+			return;
+		}
+
+		//
+		// Make sure we're dealing with an ACE we know
+		//
+		if (!( (paaAllowedAce->Header.AceType == ACCESS_ALLOWED_ACE_TYPE)
+				||(paaAllowedAce->Header.AceType == ACCESS_DENIED_ACE_TYPE )
+				||(paaAllowedAce->Header.AceType == SYSTEM_AUDIT_ACE_TYPE  )
+				||(paaAllowedAce->Header.AceType == SYSTEM_ALARM_ACE_TYPE  ))) {
+			continue;
+		}
+
+		//
+		// Look at the SID's subauthorities to see if there's a match
+		// with the old computer SID
+		//
+		descriptorModified |= SecurityReplaceSID((PSID)&(paaAllowedAce->SidStart));
+	}
+
+	//
+	// If the security descriptor was modified because an
+	// old computer SID was converted to the new one, write
+	// the new descriptor to disk.
+	//
+	if( descriptorModified ) {
+
+		//
+		// Modify the SD on the hard disk
+		//
+		if( Dacl ) {
+
+			//
+			// Modify the SD in virtual memory
+			//
+			if (!SetSecurityDescriptorDacl(psdFileSD,
+								TRUE, paclFile, FALSE)) {
+
+				return;
+			}
+
+			if (!SetFileSecurity(lpszFullName,
+							(SECURITY_INFORMATION)DACL_SECURITY_INFORMATION,
+							psdFileSD)){
+
+				return;
+			}
+		} else {
+
+			//
+			// Modify the SD in virtual memory
+			//
+			if (!SetSecurityDescriptorSacl(psdFileSD,
+								TRUE, paclFile, FALSE)) {
+
+				return;
+			}
+
+			if (!SetFileSecurity(lpszFullName,
+							(SECURITY_INFORMATION)SACL_SECURITY_INFORMATION,
+							psdFileSD)){
+
+				return;
+			}
+		}
+	}
+}
+
+
+//----------------------------------------------------------------------
+//
+// CheckFileSID
+//
+// Reads the file's security descriptor and converts it to absolute
+// format. Then it calls a function to check the ownership SIDs and
+// finally one to check the DACL SIDs, to see if they need to be
+// updated.
+//
+//----------------------------------------------------------------------
+BOOL CheckFileSID(LPTSTR lpszFullName)
+{
+	UCHAR       ucBufAbs[SZ_ABS_SD_BUF];
+	PSECURITY_DESCRIPTOR psdSrelFileSD;
+	PSECURITY_DESCRIPTOR psdAbsFileSD = (PSECURITY_DESCRIPTOR)&ucBufAbs;
+	SECURITY_DESCRIPTOR_CONTROL sdcCtrl;
+	PACL        paclDacl;
+	PACL        paclSacl;
+	PSID        psidSidOwn;
+	PSID        psidSidPG;
+	BOOL        bDaclPresent;
+	BOOL        bDaclDefaulted;
+	BOOL        bSaclPresent;
+	BOOL        bSaclDefaulted;
+	BOOL        bOwnerDefaulted;
+	BOOL        bGroupDefaulted;
+	BOOL        bSDSelfRelative;
+	DWORD       dwRevision;
+
+	//
+	// Get the file's security descriptor
+	//
+	if( GetNamedSecurityInfo( lpszFullName, SE_FILE_OBJECT,
+						(SECURITY_INFORMATION)( OWNER_SECURITY_INFORMATION
+					   | GROUP_SECURITY_INFORMATION
+					   | DACL_SECURITY_INFORMATION
+					   | SACL_SECURITY_INFORMATION),
+					   &psidSidOwn,
+					   &psidSidPG,
+					   &paclDacl,
+					   &paclSacl,
+					   &psdSrelFileSD )) {
+
+		return FALSE;
+	}
+
+	//
+	// Build File SD in absolute format for potential later modification
+	//
+	if (!InitializeSecurityDescriptor(psdAbsFileSD,
+		 SECURITY_DESCRIPTOR_REVISION)) { 
+
+		LocalFree( psdSrelFileSD );
+		return FALSE;
+	}
+
+	//
+	// Get Control from relative format File SD
+	//
+	if (!GetSecurityDescriptorControl(psdSrelFileSD,
+			&sdcCtrl,
+			&dwRevision)) { 
+
+		LocalFree( psdSrelFileSD );
+		return FALSE;
+	} 
+	bSDSelfRelative = (SE_SELF_RELATIVE & sdcCtrl);
+
+	//
+	// Set DACL into absolute format File SD
+	//
+	if (bDaclPresent = (SE_DACL_PRESENT  & sdcCtrl)) {
+
+		bDaclDefaulted = (SE_DACL_DEFAULTED & sdcCtrl);
+	}
+	if (!SetSecurityDescriptorDacl(psdAbsFileSD,
+							bDaclPresent,       // fDaclPresent flag
+							paclDacl,
+							bDaclDefaulted)) {
+
+		LocalFree( psdSrelFileSD );
+		return FALSE;
+	}
+
+	//  
+	// Set SACL into absolute format File SD
+	//
+	if (bSaclPresent = (SE_SACL_PRESENT   & sdcCtrl)){
+
+		bSaclDefaulted = (SE_SACL_DEFAULTED & sdcCtrl);
+	}
+	if (!SetSecurityDescriptorSacl(psdAbsFileSD,
+						bSaclPresent,       // fSaclPresent flag
+						paclSacl,
+						bSaclDefaulted)) {
+
+		LocalFree( psdSrelFileSD );
+		return FALSE;
+	} 
+
+	//
+	// Set Owner into absolute format File SD
+	//
+	bOwnerDefaulted = (SE_OWNER_DEFAULTED & sdcCtrl);
+	if (!SetSecurityDescriptorOwner(psdAbsFileSD,
+					psidSidOwn,
+					bOwnerDefaulted)) {
+
+		LocalFree( psdSrelFileSD );
+		return FALSE;
+	}
+
+	//
+	// Set Group into absolute format File SD
+	//
+	bGroupDefaulted = (SE_GROUP_DEFAULTED & sdcCtrl);
+	if (!SetSecurityDescriptorGroup(psdAbsFileSD,
+					psidSidPG,
+					bGroupDefaulted)) {
+
+		LocalFree( psdSrelFileSD );
+		return FALSE;
+	}
+
+	//
+	// Now we can see if the old computer SID is embedded
+	// in the security descriptor, and change it if necessary
+	//
+	CheckFileOwnershipForSID(psdAbsFileSD,lpszFullName);
+	
+	//
+	// Check to see if SID is embedded in the DACL and then
+	// SACL
+	//
+	CheckFileACLForSID( TRUE, psdAbsFileSD,lpszFullName);
+	CheckFileACLForSID( FALSE, psdAbsFileSD, lpszFullName );
+	LocalFree( psdSrelFileSD );
+	return(TRUE);
+}
+
+
+//----------------------------------------------------------------------
+//
+// UpdateFileSID
+//
+// Updates the SIDs for the specified file or directory and recurses
+// on subdirectories and files.
+//
+//----------------------------------------------------------------------
+void UpdateFileSID( HWND hDlg, PTCHAR PathName )
+{
+	TCHAR			subName[MAX_PATH], searchName[MAX_PATH];
+	HANDLE			dirHandle;
+	WIN32_FIND_DATA foundFile;
+
+	//
+	// Process this file or directory
+	//
+	UpdateProgressDialog( hDlg, IDC_PATHNAME, PathName );
+	CheckFileSID( PathName );
+
+	//
+	// Scan the files and/or directories if this is a directory
+	//
+	wsprintf( searchName, L"%s\\*.*", PathName );
+	if( (dirHandle = FindFirstFile( searchName, &foundFile )) == 
+		INVALID_HANDLE_VALUE  ) {
+
+		//
+		// Nothing to process
+		//
+		return;
+	}
+
+	do {
+
+		if( wcscmp( foundFile.cFileName, L"." ) &&
+			wcscmp( foundFile.cFileName, L".." )) {
+
+			//
+			// Process the subfile or directory
+			//
+			wsprintf( subName, L"%s\\%s", PathName, foundFile.cFileName );
+			UpdateFileSID( hDlg, subName );
+		}
+	} while( FindNextFile( dirHandle, &foundFile ));
+
+	FindClose( dirHandle );
+}
+
+
+//----------------------------------------------------------------------
+//
+// UpdateFileSystemSID
+//
+// Scans all the non-removable NTFS drives looking for SIDs
+// that need to be changed in the security descriptors.
+//
+//----------------------------------------------------------------------
+void UpdateFileSystemSID( HWND hDlg)
+{
+	DWORD	drives, curDrive;
+	TCHAR	drivePath[16], startPath[16];
+	TCHAR	fileSystem[256];
+
+	SetDlgItemText( hDlg, IDC_OPERATION, _T("Updating file system:"));
+	drives = GetLogicalDrives();
+	curDrive = 2;  // start with 'C:'
+	while( curDrive < 26 ) { 
+
+		wsprintf( drivePath, L"%c:\\", curDrive + L'A');
+
+		GetVolumeInformation( drivePath, NULL, 0, NULL, NULL,
+								NULL, fileSystem, 256 );
+
+		//
+		// Only process local NTFS drives
+		//
+		if( ((1 << curDrive) & drives ) && 
+			(GetDriveType( drivePath ) == DRIVE_FIXED) &&
+			!wcsicmp( fileSystem, L"NTFS")) {
+
+			wsprintf( startPath, L"%c:", curDrive + L'A');
+			UpdateFileSID( hDlg, startPath ); 	
+		}
+		curDrive++;
+	}
+}
+
+
+
+
