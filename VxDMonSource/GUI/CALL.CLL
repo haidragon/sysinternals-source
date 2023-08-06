@@ -1,0 +1,81 @@
+Callers of VPICD_Phys_EOI:
+
+End_Nest_Exec
+	Exec_Int
+		Exec_PM_Int
+		Simulate_Int
+			Exec_Int
+		V86MMGR_Xlat_API
+			Exec_Int
+	Resume_Exec
+		Exec_Int
+			Exec_PM_Int
+			Simulate_Int
+				Exec_Int
+			V86MMGR_Xlat_API
+				Exec_Int
+		Resume_Exec
+Exec_Int
+	Exec_PM_Int
+	Simulate_Int
+		Exec_Int
+	V86MMGR_Xlat_API
+		Exec_Int
+Restore_Client_State
+	Exec_Int
+		Exec_PM_Int
+		Simulate_Int
+			Exec_Int
+		V86MMGR_Xlat_API
+			Exec_Int
+	Resume_Exec
+		Exec_Int
+			Exec_PM_Int
+			Simulate_Int
+				Exec_Int
+			V86MMGR_Xlat_API
+				Exec_Int
+		Resume_Exec
+Set_Global_Time_Out
+	End_V86_Serialization
+		End_Nest_Exec
+			Exec_Int
+				Exec_PM_Int
+				Simulate_Int
+					Exec_Int
+				V86MMGR_Xlat_API
+					Exec_Int
+			Resume_Exec
+				Exec_Int
+					Exec_PM_Int
+					Simulate_Int
+						Exec_Int
+					V86MMGR_Xlat_API
+						Exec_Int
+				Resume_Exec
+	Exec_Int
+		Exec_PM_Int
+		Simulate_Int
+			Exec_Int
+		V86MMGR_Xlat_API
+			Exec_Int
+	Resume_Exec
+		Exec_Int
+			Exec_PM_Int
+			Simulate_Int
+				Exec_Int
+			V86MMGR_Xlat_API
+				Exec_Int
+		Resume_Exec
+	Wait_Semaphore
+		Set_Thread_Win32_Pri
+			Time_Slice_Sys_VM_Idle
+			Time_Slice_Wake_Sys_VM
+				Wait_Semaphore
+		Wait_Semaphore
+Simulate_Int
+	Exec_Int
+		Exec_PM_Int
+		Simulate_Int
+		V86MMGR_Xlat_API
+			Exec_Int

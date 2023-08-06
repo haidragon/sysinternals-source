@@ -1,0 +1,27 @@
+[OPTIONS]
+TITLE=VxDMon Help
+;COMPRESS=true
+WARNING=1  ; If you remove this line, then HC will report the following
+           ; error message:
+           ;
+           ;    R1023: Keyword(s) defined without title in page 59
+           ;           of file helpex.rtf
+           ;
+           ; This message indicates that a topic will be listed in
+           ; the Search Topics Found box as ">>Untitled Topic<<"
+
+[FILES]
+vxdmon.rtf  ; main topics
+
+[WINDOWS]
+main="Command Reference", (100,100,800,800), , , (0,0,255)
+
+[BITMAPS]
+
+
+[CONFIG]
+BrowseButtons()
+
+[MAP]
+
+

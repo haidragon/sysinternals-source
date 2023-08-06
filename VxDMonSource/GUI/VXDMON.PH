@@ -1,0 +1,22 @@
+Introduction
+This button toggles a graph showing the compression
+VxD
+VxDMon
+Windows
+and
+behavior
+button
+call
+compression
+dialog
+histor
+hook
+information
+monitor
+performance
+service
+showing
+that
+the
+through
+toggles

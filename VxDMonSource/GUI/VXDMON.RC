@@ -1,0 +1,166 @@
+//Microsoft Visual C++ generated resource script.
+//
+#include "resource.h"
+
+#define APSTUDIO_READONLY_SYMBOLS
+/////////////////////////////////////////////////////////////////////////////
+//
+// Generated from the TEXTINCLUDE 2 resource.
+//
+#define APSTUDIO_HIDDEN_SYMBOLS
+#include "windows.h"
+#undef APSTUDIO_HIDDEN_SYMBOLS
+#include "vxdmon.h"
+
+/////////////////////////////////////////////////////////////////////////////
+#undef APSTUDIO_READONLY_SYMBOLS
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Icon
+//
+
+UNSELECTED              ICON    DISCARDABLE     "UNSELECT.ICO"
+SELECTED                ICON    DISCARDABLE     "SELECTED.ICO"
+SOMESELECTED            ICON    DISCARDABLE     "SOMESELE.ICO"
+CALLER                  ICON    DISCARDABLE     "ICON1.ICO"
+CALLEE                  ICON    DISCARDABLE     "ICO00001.ICO"
+APPICON                 ICON    DISCARDABLE     "vxdmon.ico"
+TREEICON                ICON    DISCARDABLE     "ICO00003.ICO"
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Menu
+//
+
+LISTMENU MENU DISCARDABLE 
+BEGIN
+    POPUP "&File"
+    BEGIN
+        MENUITEM "S&ave Statistics...\tCtrl+S", IDM_SAVE
+        MENUITEM "Sa&ve Statistics As...\tF12", IDM_SAVEAS
+        MENUITEM SEPARATOR
+        MENUITEM "E&xit",                       IDM_EXIT
+    END
+    POPUP "&Capture"
+    BEGIN
+        MENUITEM "&Select Services...",         IDM_TREEVIEW
+        MENUITEM SEPARATOR
+        MENUITEM "&Update Statistics\tCtrl+U",  IDM_SAMPLE
+        MENUITEM "&Reset Statistics\tCtrl+R",   IDM_ZEROSTATS
+        MENUITEM SEPARATOR
+        MENUITEM "Show &Ancestors...",          IDM_ANCESTORS
+        MENUITEM "Show &Descendants...",        IDM_DESCENDANTS
+    END
+    POPUP "&Preferences"
+    BEGIN
+        MENUITEM "Show Un&called",              IDM_IGNORE
+        MENUITEM "&Overhead Compensation",      IDM_OVERHEAD, CHECKED
+        MENUITEM "&Zero Statistics on Update",  IDM_RESETONUPDATE
+    END
+    POPUP "&Help"
+    BEGIN
+        MENUITEM "&Help\tF1",                   IDM_HELP
+        MENUITEM "&About...",                   IDM_ABOUT
+    END
+END
+
+TREEMENU MENU DISCARDABLE 
+BEGIN
+    POPUP "&Options"
+    BEGIN
+        MENUITEM "&Hook/Unhook Now",            IDOK
+        MENUITEM "&Save Hook List",             IDM_SAVE
+        MENUITEM "&Close",                      IDM_EXIT
+    END
+END
+
+CALLMENU MENU DISCARDABLE 
+BEGIN
+    POPUP "&Options"
+    BEGIN
+        MENUITEM "Show &Ancestors...",          IDM_ANCESTORS
+        MENUITEM "Show &Descendants...",        IDM_DESCENDANTS
+        MENUITEM SEPARATOR
+        MENUITEM "&Save Call Graph As...",      IDM_CALLSAVE
+        MENUITEM SEPARATOR
+        MENUITEM "&Close",                      IDM_EXIT
+    END
+END
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Dialog
+//
+
+ABOUTBOX DIALOG DISCARDABLE  160, 78, 148, 77
+STYLE DS_MODALFRAME | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU
+CAPTION "About VxDMon"
+FONT 8, "MS Sans Serif"
+BEGIN
+    PUSHBUTTON      "OK",IDOK,48,58,47,12
+    CTEXT           "VxD Monitor 1.0",IDC_STATIC,43,7,61,8
+    CTEXT           "Bryce Cogswell",IDC_STATIC,39,35,69,8,NOT WS_GROUP
+    CTEXT           "Mark Russinovich",IDC_STATIC,40,45,66,8,NOT WS_GROUP
+    CTEXT           "Copyright (C) 1996",IDC_STATIC,37,25,72,8
+    ICON            "APPICON",IDC_STATIC,13,10,18,20
+END
+
+
+#ifdef APSTUDIO_INVOKED
+/////////////////////////////////////////////////////////////////////////////
+//
+// TEXTINCLUDE
+//
+
+1 TEXTINCLUDE DISCARDABLE 
+BEGIN
+    "resource.h\0"
+END
+
+2 TEXTINCLUDE DISCARDABLE 
+BEGIN
+    "#define APSTUDIO_HIDDEN_SYMBOLS\r\n"
+    "#include ""windows.h""\r\n"
+    "#undef APSTUDIO_HIDDEN_SYMBOLS\r\n"
+    "#include ""vxdmon.h""\r\n"
+    "\0"
+END
+
+3 TEXTINCLUDE DISCARDABLE 
+BEGIN
+    "\r\n"
+    "\0"
+END
+
+/////////////////////////////////////////////////////////////////////////////
+#endif    // APSTUDIO_INVOKED
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Accelerator
+//
+
+ACCELERATORS ACCELERATORS DISCARDABLE 
+BEGIN
+    "R",            IDM_ZEROSTATS,          VIRTKEY, CONTROL, NOINVERT
+    "S",            IDM_SAVE,               VIRTKEY, CONTROL, NOINVERT
+    "U",            IDM_SAMPLE,             VIRTKEY, CONTROL, NOINVERT
+    VK_F1,          IDM_HELP,               VIRTKEY, NOINVERT
+    VK_F12,         IDM_SAVEAS,             VIRTKEY, NOINVERT
+END
+
+
+#ifndef APSTUDIO_INVOKED
+/////////////////////////////////////////////////////////////////////////////
+//
+// Generated from the TEXTINCLUDE 3 resource.
+//
+
+
+/////////////////////////////////////////////////////////////////////////////
+#endif    // not APSTUDIO_INVOKED
+

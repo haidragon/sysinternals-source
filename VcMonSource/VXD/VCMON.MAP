@@ -1,0 +1,138 @@
+ VCMON
+
+ Timestamp is 32c0ab5c (Tue Dec 24 23:19:40 1996)
+
+ Preferred load address is 00400000
+
+ Start         Length     Name                   Class
+ 0001:00000000 000000dcH .bss                    CODE
+ 0001:000000dc 00000004H .data                   CODE
+ 0001:000000e0 000000e0H _LDATA                  CODE
+ 0001:000001c0 00000664H _LTEXT                  CODE
+ 0002:00000000 00000004H ICRTTEXT                CODE
+ 0002:00000004 00000004H ICRTXXXX                CODE
+ 0002:00000008 0000003cH _IDATA                  CODE
+ 0002:00000044 00000018H _ITEXT                  CODE
+
+  Address         Publics by Value              Rva+Base   Lib:Object
+
+ 0001:00000000       _VCacheGetStatsService     00401000   <common>
+ 0001:00000004       _GuiEvent                  00401004   <common>
+ 0001:00000010       _thunkVCacheHoldHook       00401010   <common>
+ 0001:0000002c       _VCacheHoldService         0040102c   <common>
+ 0001:00000030       _thunkVCacheGetStatsHook   00401030   <common>
+ 0001:0000004c       _GuiTimeoutHandle          0040104c   <common>
+ 0001:00000050       _VCacheFindBlockService    00401050   <common>
+ 0001:00000060       _Stats                     00401060   <common>
+ 0001:00000090       _GuiTimeThunk              00401090   <common>
+ 0001:0000009c       _PageFileReadWriteService  0040109c   <common>
+ 0001:000000a0       _thunkVCacheFindBlockHook  004010a0   <common>
+ 0001:000000c0       _thunkPageFileReadWriteHook 004010c0   <common>
+ 0001:000000dc       _VXD_SERVICE_TABLE_SIZE    004010dc   vcmon.OBJ
+ 0001:000000e0       _VXD_SERVICE_TABLE         004010e0   vcmon.OBJ
+ 0001:000000e8       _The_DDB                   004010e8   vcmon.OBJ
+ 0001:00000138       _SampleRate                00401138   vcmon.OBJ
+ 0001:0000013c       _Connected                 0040113c   vcmon.OBJ
+ 0001:00000140       _FailConnect               00401140   vcmon.OBJ
+ 0001:000001c0       _LOCK_dprintf              004011c0 f vcmon.OBJ
+ 0001:000001c1       _VCMON_Get_Version         004011c1 f vcmon.OBJ
+ 0001:000001c7       _GuiTimeout@16             004011c7 f vcmon.OBJ
+ 0001:00000230       _PageFileReadWriteHook@4   00401230 f vcmon.OBJ
+ 0001:0000025d       _VCacheGetStatsHook@4      0040125d f vcmon.OBJ
+ 0001:0000029b       _VCacheHoldHook@4          0040129b f vcmon.OBJ
+ 0001:000002c8       _VCacheFindBlockHook@4     004012c8 f vcmon.OBJ
+ 0001:000003e8       _DoHooks                   004013e8 f vcmon.OBJ
+ 0001:0000044d       _DoUnhooks                 0040144d f vcmon.OBJ
+ 0001:0000049e       _OnSysCriticalInit         0040149e f vcmon.OBJ
+ 0001:000004a9       _OnSysDynamicInit          004014a9 f vcmon.OBJ
+ 0001:000004b4       _OnW32Deviceiocontrol      004014b4 f vcmon.OBJ
+ 0001:000005c9       _OnSysCriticalExit         004015c9 f vcmon.OBJ
+ 0001:000005ce       _OnSysDynamicExit          004015ce f vcmon.OBJ
+ 0001:000005d9       _ControlDispatcher         004015d9 f vcmon.OBJ
+ 0001:00000647       _LocalPMhandler            00401647 f cfMS940D:control.obj
+ 0001:00000651       _LocalV86handler           00401651 f cfMS940D:control.obj
+ 0001:0000065b       _LocalControlDispatcher    0040165b f cfMS940D:control.obj
+ 0001:00000690       _PM_Api_Handler            00401690 f cfMS940D:pmapi.obj
+ 0001:00000694       _V86_Api_Handler           00401694 f cfMS940D:v86api.obj
+ 0001:00000698       _LOCK_Set_Global_Time_Out@16 00401698 f wr0MS940:VW035l.obj
+ 0001:000006cc       _LOCK__GetFreePageCount@8  004016cc f wr0MS940:VW149l.obj
+ 0001:000006e4       _LOCK_Hook_Device_Service@12 004016e4 f wr0MS940:VW107l.obj
+ 0001:00000728       _LOCK_Unhook_Device_Service@12 00401728 f wr0MS940:VW240l.obj
+ 0001:00000750       _LOCK_Cancel_Time_Out@4    00401750 f wr0MS940:VW214l.obj
+ 0001:00000764       _LOCK_VWIN32_DIOCCompletionRoutine 00401764 f wr3MS940:VW804l.obj
+ 0001:00000774       _LOCK_VCache_GetSize@8     00401774 f wr3MS940:VW865l.obj
+ 0001:00000788       _LOCK_Call_Previous_Hook_Proc@8 00401788 f wr3MS940:VW902l.obj
+ 0001:000007cc       __InitThunk                004017cc f wr3MS940:VW970.obj
+ 0001:000007f4       _TIMEOUT_thunkTEMPLATE     004017f4   wr3MS940:VW974.obj
+ 0001:00000804       _DeviceService_thunkTEMPLATE 00401804   wr3MS940:VW957.obj
+ 0002:00000044       INITCRT                    00401a44   ICRTMS9.OBJ
+
+ entry point at        0000:00000000
+
+ Static symbols
+
+ 0001:00000695       $$$00002                   00401695 f cfMS940D:v86api.obj
+ 0001:00000691       $$$00002                   00401691 f cfMS940D:pmapi.obj
+ 0002:00000044       $$$00001                   00401a44 f cfMS940D:control.obj
+ 0001:000001c0       $$$00002                   004011c0 f cfMS940D:control.obj
+ 0001:00000638       $$$00003                   00401638 f cfMS940D:control.obj
+ 0001:00000651       $$$00005                   00401651 f cfMS940D:control.obj
+ 0001:0000065b       $$$00007                   0040165b f cfMS940D:control.obj
+ 0001:00000690       $$$00009                   00401690 f cfMS940D:control.obj
+
+Line numbers for vcmon.OBJ(.\vcmon.c) segment LCODE_vxdpn
+
+    74 0001:000001c0    87 0001:000001c1    89 0001:000001c6   102 0001:000001c7
+   106 0001:000001cd   109 0001:000001e5   112 0001:000001fa   115 0001:00000208
+   117 0001:00000211   118 0001:0000022c   129 0001:00000230   132 0001:00000237
+   133 0001:00000240   134 0001:00000246   135 0001:00000248   136 0001:0000024e
+   137 0001:00000259   150 0001:0000025d   151 0001:00000261   152 0001:0000026f
+   153 0001:00000278   155 0001:00000281   156 0001:00000296   168 0001:0000029b
+   169 0001:0000029f   170 0001:000002b2   171 0001:000002bd   172 0001:000002c4
+   186 0001:000002c8   190 0001:000002d8   191 0001:000002e8   192 0001:000002ee
+   193 0001:000002fb   194 0001:00000301   195 0001:0000030e   196 0001:00000314
+   197 0001:00000321   198 0001:00000327   199 0001:00000334   200 0001:0000033a
+   203 0001:00000347   224 0001:0000034e   225 0001:00000359   226 0001:0000035f
+   227 0001:00000365   228 0001:00000367   206 0001:0000036f   207 0001:00000380
+   208 0001:00000386   209 0001:0000038b   210 0001:00000391   211 0001:00000397
+   213 0001:00000399   214 0001:000003a0   218 0001:000003a6   219 0001:000003b7
+   233 0001:000003bd   234 0001:000003c9   235 0001:000003cf   236 0001:000003df
+   247 0001:000003e8   258 0001:00000406   264 0001:0000041f   270 0001:00000438
+   271 0001:0000044c   282 0001:0000044d   291 0001:00000461   296 0001:00000475
+   301 0001:00000489   303 0001:0000049d   315 0001:0000049e   317 0001:000004a3
+   318 0001:000004a8   329 0001:000004a9   331 0001:000004ae   332 0001:000004b3
+   350 0001:000004b4   353 0001:000004bb   400 0001:000004e0   369 0001:000004ea
+   370 0001:000004f3   371 0001:000004fd   375 0001:00000502   378 0001:0000051a
+   381 0001:00000533   384 0001:00000548   385 0001:0000055b   386 0001:0000056b
+   391 0001:0000056d   394 0001:0000057e   396 0001:00000583   356 0001:000005a1
+   358 0001:000005ab   359 0001:000005b6   362 0001:000005c2   402 0001:000005c4
+   413 0001:000005c9   426 0001:000005ce   428 0001:000005d3   429 0001:000005d8
+   446 0001:000005d9   447 0001:000005e2   457 0001:000005f8   451 0001:000005ff
+   452 0001:00000612   449 0001:0000061e   450 0001:00000625   453 0001:0000062c
+   458 0001:00000634
+
+Line numbers for d:\vtd95\lib\cfMS940D.lib(src40\v86api.asm) segment LCODE_vxdpn
+
+    22 0001:00000694
+
+Line numbers for d:\vtd95\lib\cfMS940D.lib(src40\pmapi.asm) segment LCODE_vxdpn
+
+    22 0001:00000690
+
+Line numbers for d:\vtd95\lib\cfMS940D.lib(src40\control.asm) segment LCODE_vxdpn
+
+    42 0001:00000638    69 0001:0000063d    70 0001:00000642    72 0001:00000645
+    81 0001:00000647    84 0001:00000648    86 0001:00000649    88 0001:0000064e
+    89 0001:0000064f    90 0001:00000650   103 0001:00000651   106 0001:00000652
+   108 0001:00000653   110 0001:00000658   111 0001:00000659   112 0001:0000065a
+   137 0001:0000065b   140 0001:0000065c   141 0001:0000065d   142 0001:0000065e
+   143 0001:0000065f   144 0001:00000660   146 0001:00000661   147 0001:00000669
+   153 0001:0000066b   154 0001:0000066c   156 0001:00000671   157 0001:00000672
+   158 0001:00000675   159 0001:00000677   160 0001:0000067a   162 0001:0000067c
+   163 0001:00000680   166 0001:00000681   167 0001:00000682   168 0001:00000683
+   169 0001:00000684   170 0001:00000685   172 0001:00000686   175 0001:00000687
+   176 0001:00000689   177 0001:0000068c   178 0001:0000068e
+
+FIXUPS: 157f 17 1c 18 5 3a a c 7 a 1a a 19 fffffb68 13 13 26 34 16 24 1c
+FIXUPS: 12b9 25 16 13 13 13 13 15 32 32 1f 20 19 19 19 1a 14 14 14 6 b
+FIXUPS: 150a 13 32

@@ -1,0 +1,30 @@
+VCMON
+
+Copyright (c) 1996 Mark Russinovich and Bryce Cogswell
+
+
+This is the VCMon application. This top-level directory contains the
+source to VCMON.EXE, which is the win32 gui. The VXD subdirectory contains 
+the source for VCMON.VXD.
+
+There are two ways to run VCMon. If you would like statistics to be
+gathered from the time that Windows starts, place the following line
+in the [386Enh] section of your system.ini file:
+
+	device=<THISDIR>\vxd\vcmon.vxd
+
+where THISDIR is the full path to the directory containing this readme.
+
+If you are not concerned with seeing cummulated stats from the start
+of Windows, then run VCMon as a dynamic VxD. To do this simply start 
+VCMON.EXE with the current directory set to this directory. In this case
+statistics will reflect only results from the time VCMON was started.
+
+The VCMon gui was compiled with MSVC++ 2.0 with added custom controls
+(see the MS Knowledge Base for adding Windows 95 custom controls to VC 2.0).
+
+The VCMon vxd was compiled with VtoolsD 2.0 for Windows 95, VC 2.0 and
+Nu-Mega Technologies Soft-ICE debugger.
+
+Mark and Bryce can be reached at mer@cs.uoregon.edu and 
+cogswell@cs.uoregon.edu respectively.

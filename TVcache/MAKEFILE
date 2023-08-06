@@ -1,0 +1,15 @@
+# VCACHE.mak - makefile for VxD VCACHE
+
+DEVICENAME = TVCACHE
+FRAMEWORK = C
+DEBUG = 1
+OBJECTS = vcache.OBJ vcasm.OBJ compress.OBJ compasm.OBJ
+
+!include $(VTOOLSD)\include\vtoolsd.mak
+!include $(VTOOLSD)\include\vxdtarg.mak
+
+vcache.OBJ:	vcache.c 
+vcasm.OBJ:	vcasm.asm
+compress.OBJ:   compress.c
+compasm.OBJ:	compasm.asm
+

@@ -1,0 +1,672 @@
+//======================================================================
+//
+// VCACHE.c - main module for VxD VCACHE
+//
+// Copyright (C) 1995 - Mark Russinovich and Bryce Cogswell
+//
+// This code implements a replacement for VCache that caches compressed
+// data.
+//
+//======================================================================
+#define   DEVICE_MAIN
+#include  <vtoolsc.h>
+#undef    DEVICE_MAIN
+#include  "compress.h"
+
+
+#define NUMBUCKETS         100
+#define MINHOLESIZE        0
+
+#define VCache_Major       1
+#define VCache_Minor       0
+#define VCache_DeviceID    VCache_Device_ID
+#define VCache_Init_Order  UNDEFINED_INIT_ORDER
+
+// VxD Declaration
+Declare_Virtual_Device(VCache)
+
+// memory management data structure that matches
+// the original vcache structures
+typedef struct vc_s {
+  struct vc_s     *next;
+  struct vc_s     *prev;
+  DWORD           key1;
+  DWORD           key2;
+  PVOID           *buffer;
+  BYTE            reserved[0x1C];
+  WORD            holdcount;
+  BYTE            reserved1;
+  BYTE            fsdid;
+  struct vc_s     *lru_next;
+  struct vc_s     *lru_prev;
+  struct vc_s     *lru_whoknows;
+} vcache_s;
+
+// our data structure that parallels the vcache ones. These
+// contain our book-keeping information
+typedef struct tc_s {
+  BYTE            refcount;     // reference count for memory page
+} turbo_s;
+
+
+// header for allocated (and free) memory
+struct mem_page {
+    // Memory management
+    struct mem_page    *left; 		// Left neighbor
+    struct mem_page    *right;		// Right neighbor
+    struct mem_page    *next;		// Next in list
+    struct mem_page   **prev;		// Prev in list
+    DWORD		size   : 31;	// Size of block (including header)
+    DWORD		free   :  1;	// Is block free?
+
+    // guts
+    DWORD		pfoffset;	// page file entry
+    BYTE		data[ 0 ];	// data in block
+};
+
+
+
+// Define memory allocation unit from system
+struct chunk {
+    DWORD		memhandle;	// memory block handle
+    struct chunk       *next;		// next chunk
+    WORD		shrinking :  1;	// currently deallocating 
+    WORD		pad	  : 15;
+    struct mem_page    *freelist;
+    BYTE                data[ 0 ];
+};
+
+
+//======================================================================
+//
+//                            LOCKED DATA
+//
+//======================================================================
+#include LOCKED_DATA_SEGMENT
+
+// hash list
+vcache_s     *hashbuck[ NUMBUCKETS ];
+
+// lru head
+vcache_s      lruhead;
+
+// pagelist
+struct chunk *pagelist;
+
+// blocklist
+vcache_s     *blocklist;
+turbo_s      *turbolist;
+
+
+//======================================================================
+//
+//                            LOCKED CODE
+//
+//======================================================================
+#include LOCKED_CODE_SEGMENT
+
+
+void __inline FreelistRemove( struct mem_page * p )
+{
+    if ( *p->prev = p->next )
+	p->next->prev = p->prev;
+}
+
+void __inline FreelistInsert( struct mem_page * p )
+{
+    if ( p->next = *(p->prev = &pagelist->freelist) )
+	p->next->prev = & p->next;
+    pagelist->freelist = p;
+}
+
+
+//----------------------------------------------------------------------
+//
+// MemAllocate
+//
+// Given a length, finds and returns a block of that size from the 
+// free memory pool.
+//
+//----------------------------------------------------------------------
+struct mem_page * MemAllocate( DWORD len )
+{
+    struct mem_page *	hole = NULL;
+
+    // Account for header size
+    len += sizeof(struct mem_page);
+
+    // Iterate over chunks/holes
+    if ( pagelist->freelist == NULL || pagelist->freelist->size < len )
+      return NULL;
+
+    // Mark as no longer free
+    hole->free = FALSE;
+
+    // If allocated too big a block put extra back on free list 
+    if ( hole->size >= len + sizeof(struct mem_page) + MINHOLESIZE )  {
+	struct mem_page * keep = (void *)((BYTE *)hole + len);
+
+	keep->left	= hole;
+	keep->right	= hole->right;
+	keep->size	= hole->size - len;
+	keep->free	= TRUE;
+	if ( keep->right )
+	    keep->right->left = keep;
+
+	// Replace hole with keeper in free list
+	FreelistRemove( hole );
+	FreelistInsert( keep );
+
+	// Update new, smaller block we're returning 
+	hole->right	= keep;
+	hole->size	= len;
+
+    } else {
+	// Delete block from free list
+	FreelistRemove( hole );
+    }
+
+    return hole;
+}
+
+
+//----------------------------------------------------------------------
+//
+// MemDeallocate
+//
+// Given a memory page data structure, returns the memory associated
+// with it to the free memory pool.
+//
+//----------------------------------------------------------------------
+void MemDeallocate( struct mem_page * mem )
+{
+    struct mem_page * left	= mem->left;
+    struct mem_page * right	= mem->right;
+
+    // Update block to left 
+    if ( left  &&  left->free )  {
+
+	if ( right  &&  right->free )  {
+
+	    // Both left and right free 
+	    if ( right->right )
+		right->right->left	= left;
+	    left->right			= right->right;
+
+	    FreelistRemove( right );
+	    FreelistRemove( left );
+	    left->size += mem->size + right->size;
+	    FreelistInsert( left );
+
+	} else {
+
+	    // Left free, right not 
+	    left->right		= right;
+	    if ( right )
+		right->left	= left;
+
+	    FreelistRemove( left );
+	    left->size += mem->size;
+	    FreelistInsert( left );
+	}
+
+    } else {
+
+	if ( right  &&  right->free )  {
+
+	    // Right free, left not 
+	    if ( right->right )
+		right->right->left	= mem;
+	    mem->right			= right->right;
+	    mem->free			= TRUE;
+
+	    FreelistRemove( right );
+	    mem->size += right->size;
+	    FreelistInsert( mem );
+
+	} else {
+
+	    // Neither left nor right free 
+	    mem->free		= TRUE;
+	    FreelistInsert( mem );
+	}
+    }
+}
+
+
+//----------------------------------------------------------------------
+//
+// MemInit
+//
+// Sets our memory when we initialize.
+//
+//----------------------------------------------------------------------
+BOOL MemInit( DWORD len )
+{
+    struct mem_page *	mem;
+
+    mem = (void *) pagelist->data;
+
+    // Initialize chunk info
+    pagelist->freelist	= NULL;
+
+    // Create free list entry from free space
+    mem->size	= len - sizeof(struct chunk);
+    mem->free	= TRUE;
+    mem->left	= NULL;
+    mem->right	= NULL;
+    mem->next	= NULL;
+
+    FreelistInsert( mem );
+
+    return TRUE;
+}
+
+
+//----------------------------------------------------------------------
+//
+// VCACHE_Get_Version
+//
+// Simply returns the version number.
+// 
+//----------------------------------------------------------------------
+DWORD __cdecl VCACHE_Get_Version (void )
+{
+  return VCache_VERSION;
+}
+
+
+//----------------------------------------------------------------------
+//
+// VCACHE_Register
+//
+// Somebody wants to use VCache services so we give them a unique
+// identifier. 
+// 
+//----------------------------------------------------------------------
+BYTE __cdecl VCACHE_Register (PVOID pBufferDiscardProc, DWORD nBlocks) 
+{
+  BYTE fsd_id = 0;
+  return fsd_id;
+}
+
+
+//----------------------------------------------------------------------
+//
+// VCACHE_GetSize
+//
+// Query's either the total amount number of blocks allocated and
+// available or the number allocated by a particular client.
+// 
+//----------------------------------------------------------------------
+DWORD __cdecl VCACHE_GetSize (BYTE FsdID, PDWORD pNumberOfCacheBlocks )
+{
+  DWORD numblocks = 0;
+
+  *pNumberOfCacheBlocks = 0;
+  return numblocks;
+}
+
+
+//----------------------------------------------------------------------
+//
+// VCACHE_CheckAvail
+// 
+// Query made by VFAT to see if we have room for blocks that it is
+// considering on caching.
+//
+//----------------------------------------------------------------------
+DWORD __cdecl VCACHE_CheckAvail( BYTE FsdID, DWORD NumberOfBuffersNeeded )
+{
+  DWORD numavail = 0;
+  return numavail;
+}
+
+
+//----------------------------------------------------------------------
+//
+// VCACHE_FindBlock
+//
+// This is the workhorse. Takes an identifier tripe ( fsdid, key1, key2 )
+// and determines if we have this in the cache. If not we may
+// be asked to add it to the cache.  Note that in the case that a
+// new entry is asked to be created that it should be held so
+// that the data buffer can be filled in with the appropriate data.
+//
+//----------------------------------------------------------------------
+BOOL __cdecl VCACHE_FindBlock( BYTE FsdID, BYTE Opt, DWORD key1, DWORD key2,
+			       PHANDLE phCacheBlock, PBOOL pbBufferIsLocked,
+			       PPVOID pBufferAddress )
+{
+  
+}
+
+
+//----------------------------------------------------------------------
+//
+// VCACHE_FreeBlock
+//
+// Releases a block. This is called only after VFAT has flushed the
+// block so we don't have to call the flush callback. 
+// 
+//----------------------------------------------------------------------
+VOID __cdecl VCACHE_FreeBlock (HANDLE hCacheBlock )
+{
+}
+
+
+//----------------------------------------------------------------------
+//
+// VCACHE_MakeMRU
+//
+// The block is moved to the front of the LRU.
+// 
+//----------------------------------------------------------------------
+VOID __cdecl VCACHE_MakeMRU (HANDLE hCacheBlock) 
+{
+}
+
+
+//----------------------------------------------------------------------
+//
+// VCACHE_Hold
+//
+// The lock (hold) count on a block is incremented.
+// 
+//----------------------------------------------------------------------
+DWORD __cdecl VCACHE_Hold (HANDLE hCacheBlock )
+{
+  DWORD current_count = 0;
+  return current_count;
+}
+
+
+//----------------------------------------------------------------------
+//
+// VCACHE_Unhold
+//
+// The lock (hold) count on a block is decremented.
+// 
+//----------------------------------------------------------------------
+DWORD __cdecl VCACHE_Unhold (HANDLE hCacheBlock) 
+{
+  DWORD current_count = 0;
+  return current_count;
+}
+
+
+//----------------------------------------------------------------------
+//
+// VCACHE_Enum
+//
+// All the blocks owned by a particular client are traversed and the
+// indicated callback routine called for each with the specified
+// values.
+// 
+//----------------------------------------------------------------------
+VOID __cdecl VCACHE_Enum (BYTE FsdID, PCacheEnum_HANDLER pCallback,
+			    DWORD refebx, DWORD refecx, DWORD refebp) 
+{
+
+}
+
+
+//----------------------------------------------------------------------
+//
+// VCACHE_TestHold
+//
+// VFAT will call this to see if the hold count on a block is such that
+// it can free it.
+// 
+//----------------------------------------------------------------------
+DWORD __cdecl VCACHE_TestHold (HANDLE hCacheBlock) 
+{
+  DWORD bufferholdcount = 0;
+  return bufferholdcount;
+}
+
+
+//----------------------------------------------------------------------
+//
+// VCACHE_GetStats
+// 
+// VMM periodically calls this routine to obtain statistics on cache
+// effectiveness. It uses this in its cache grow/shrink heueristic.
+// 
+//----------------------------------------------------------------------
+VOID __cdecl VCACHE_GetStats (PDWORD pNumberOfMisses, PDWORD pNumberOfHits,
+				PPVOID pBaseAddr,
+				PDWORD pNumberOfDiscardedBlocks )
+{
+
+}
+
+
+//----------------------------------------------------------------------
+//
+// VCACHE_Deregister
+//
+// A client is leaving us. Deallocate all blocks associates with them.
+// 
+//----------------------------------------------------------------------
+VOID __cdecl VCACHE_Deregister (BYTE FsdID) 
+{
+
+}
+
+
+//----------------------------------------------------------------------
+//
+// VCACHE_AdjustMinimum
+//
+// Sets the minimum number of blocks that must be always available for
+// a particular clients use.
+// 
+//----------------------------------------------------------------------
+BOOL __cdecl VCACHE_AdjustMinimum (BYTE FsdID, DWORD NewBufferQuota) 
+{
+
+}
+
+
+//----------------------------------------------------------------------
+//
+// VCACHE_SwapBuffers
+//
+// Switches two blocks.
+// 
+//----------------------------------------------------------------------
+BOOL __cdecl VCACHE_SwapBuffers (HANDLE hCacheBlock1,  HANDLE hCacheBlock2) 
+{
+
+}
+
+
+//----------------------------------------------------------------------
+//
+// VCACHE_RelinquishPage
+//
+// VMM calls this routine whenever it wants us to give it back a page.
+// We only can do this when we have a free page to give it.
+// 
+//----------------------------------------------------------------------
+PVOID __cdecl VCACHE_RelinquishPage (void) 
+{
+
+}
+
+
+//----------------------------------------------------------------------
+//
+// VCACHE_UseThisPage
+//
+// VMM Calls this routine whenever it wants to give us another page
+// to use.
+// 
+//----------------------------------------------------------------------
+VOID __cdecl VCACHE_UseThisPage (PVOID linear) 
+{
+
+}
+
+
+//----------------------------------------------------------------------
+//
+// _VCache_CreateLookupCache
+//
+// Implement later.
+// 
+//----------------------------------------------------------------------
+DWORD __cdecl _VCache_CreateLookupCache (PCHAR szName, DWORD nMaxElems,
+					 DWORD Flags, HLOOKUP* phlookup) 
+{
+
+}
+
+
+//----------------------------------------------------------------------
+//
+// _VCache_CloseLookupCache
+//
+// Implement later.
+// 
+//----------------------------------------------------------------------
+DWORD __cdecl _VCache_CloseLookupCache ( HLOOKUP _hnd_ ) 
+{
+
+}
+
+
+//----------------------------------------------------------------------
+//
+// _VCache_DeleteLookupCache
+//
+// Implement later.
+// 
+//----------------------------------------------------------------------
+DWORD __cdecl _VCache_DeleteLookupCache (PCHAR szName) 
+{
+
+}
+
+
+//----------------------------------------------------------------------
+//
+// _VCache_Lookup
+//
+// Implement later.
+// 
+//----------------------------------------------------------------------
+DWORD __cdecl _VCache_Lookup ( HLOOKUP hLookup, ULONG keylen, PVOID pKey,
+			       PULONG pdatalen, PVOID pData) 
+{
+
+}
+
+
+//----------------------------------------------------------------------
+//
+// _VCache_UpdateLookup
+//
+// Implement later.
+// 
+//----------------------------------------------------------------------
+DWORD __cdecl _VCache_UpdateLookup (HLOOKUP hLookup, ULONG keylen, 
+				    PVOID pKey, ULONG datalen, PVOID pData) 
+{
+
+}
+
+
+//======================================================================
+//
+//                     CONTROL HANDLERS
+//
+//======================================================================
+DefineControlHandler(SYS_CRITICAL_INIT, OnSysCriticalInit);
+DefineControlHandler(DEVICE_INIT, OnDeviceInit);
+DefineControlHandler(SYS_CRITICAL_EXIT, OnSysCriticalExit);
+
+BOOL _ControlDispatcher(
+  DWORD dwControlMessage,
+  DWORD EBX,
+  DWORD EDX,
+  DWORD ESI,
+  DWORD EDI,
+  DWORD ECX)
+{
+  START_CONTROL_DISPATCH
+
+    ON_SYS_CRITICAL_INIT(OnSysCriticalInit);
+    ON_DEVICE_INIT(OnDeviceInit);
+    ON_SYS_CRITICAL_EXIT(OnSysCriticalExit);
+
+  END_CONTROL_DISPATCH
+
+  return TRUE;
+}
+
+
+//----------------------------------------------------------------------
+//
+// OnSysCriticalInit
+// 
+// Lookup system.ini parameters that might set limits on our 
+// maximum and minimum sizes.
+//
+//----------------------------------------------------------------------
+BOOL OnSysCriticalInit(VMHANDLE hVM, PCHAR CommandTail, DWORD refData)
+{
+  // query system.ini for parameters
+  return TRUE;
+}
+
+
+//----------------------------------------------------------------------
+//
+// OnDeviceInit
+//
+// Allocate all the memory we could ever hope for. 
+//
+//----------------------------------------------------------------------
+BOOL OnDeviceInit(VMHANDLE hVM, PCHAR CommandTail)
+{
+  DWORD     pagelockable, pagefree;
+
+  // see how much memory is free
+  pagefree = GetFreePageCount( 0, &pagelockable );
+  if( pagefree < pagelockable + 0x180 )
+    pagefree = pagelockable + 0x180;
+
+  // allocate data structures
+  blocklist = HeapAllocate( sizeof(vcache_s) * pagefree, HEAPZEROINIT );
+
+  // allocate parallel data structure for our stuff
+  turbolist = HeapAllocate( sizeof(turbo_s) * pagefree, HEAPZEROINIT );
+  
+  // allocate memory
+  if( pagelockable - 0x180 < 8 ) 
+    pagelockable = 8;
+  else
+    pagelockable -= 0x180;
+  pagelist = (void *)PageReserve( PR_SYSTEM, pagelockable, PR_FIXED );
+  if ( pagelist == (void *)1 )
+    return FALSE;
+
+  // set up our memory
+  MemInit( pagelockable * PAGESIZE );
+
+  return TRUE;
+}
+
+
+//----------------------------------------------------------------------
+//
+// OnSysCriticalExit
+//
+// Release resources before exiting.
+//
+//----------------------------------------------------------------------
+VOID OnSysCriticalExit(void)
+{
+}

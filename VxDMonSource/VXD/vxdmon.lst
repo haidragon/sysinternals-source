@@ -1,0 +1,2603 @@
+Microsoft (R) Macro Assembler Version 6.11d		    04/29/01 18:30:51
+VXDMHLP - VXDMHLP VxD					     Page 1 - 1
+
+
+				;****************************************************************************
+				;                                                                           *
+				; VXDMHLP								    *
+				;								  	    *
+				; Copyright (c) 1996 Bryce Cogswell and Mark Russinovich		    *
+				; All rights reserved                                                       *
+				;									    *
+				;****************************************************************************
+				;									    *
+				; VXDMHLP: Monitors entry and exit of VxDs.				    *
+				;                                                                           *
+				;****************************************************************************
+
+				;===========================================================================
+					page	,132
+					title	VXDMHLP - VXDMHLP VxD
+					name	VXDMHLP.vxd
+				;===========================================================================
+				;
+				;   Module:
+				;	Contains everything
+				;
+				;===========================================================================
+				;
+				;   Functional Description: - 
+				;
+				;
+				;			
+				;============================================================================
+
+				;============================================================================
+				;				I N C L U D E S
+				;============================================================================
+				.386p
+					.xlist
+				.list
+
+					include VXDMON.inc
+			      C ;****************************************************************************
+			      C ;
+			      C ; VXDMHLP header file
+			      C ;
+			      C ;****************************************************************************
+			      C 
+			      C 
+ = 'VXDMHLP VXD     '	      C 	VXDMHLPName	EQU	<'VXDMHLP VXD     '> 	;Must be 16 chars
+ = 0000			      C 	VXDMHLPRev	EQU	00H
+			      C 
+			      C ; REC version equates
+			      C 
+ = 0001			      C VXDMHLP_MAJOR_VERSION	EQU	1
+ = 0000			      C VXDMHLP_MINOR_VERSION	EQU	0
+			      C 
+			      C 
+			      C ; -------------------------------------------------------------------------
+			      C ; The statistics we accumulate for each service
+			      C ; -------------------------------------------------------------------------
+ = 0008			      C CALLER_CNT	EQU	8
+			      C 
+ 003C			      C ServiceStats	STRUC
+ 0000  00000000		      C SS_Ordinal	DD	?
+ 0004  00000000		      C SS_Next		DD	?
+ 0008  00000000		      C SS_Enter	DD	?
+ 000C  00000000		      C SS_Exit		DD	?
+ 0010  00000000		      C SS_TimeLo	DD	?
+ 0014  00000000		      C SS_TimeHi	DD	?
+ 0018  00000000		      C SS_CallerPtr	DD	?
+ 001C	   0008 [	      C SS_Caller	DD	CALLER_CNT dup (?)
+	    00000000
+	   ]
+			      C ServiceStats	ENDS
+			      C 
+			      C 
+			      C 
+ = 0001			      C VXDMHLP_ERROR_NOSUCHSERVICE	EQU	1
+ = 0002			      C VXDMHLP_ERROR_OUTOFMEMORY	EQU	2
+ = 0003			      C VXDMHLP_ERROR_PAGELOCK		EQU	3
+ = 0004			      C VXDMHLP_ERROR_NOTFOUND		EQU	4
+ = 0005			      C VXDMHLP_ERROR_HOOK		EQU	5
+ = 0006			      C VXDMHLP_ERROR_UNHOOK		EQU	6
+ = 0007			      C VXDMHLP_ERROR_NOSUCHVXD		EQU	7
+			      C 
+			      C 
+
+				;============================================================================
+				;	 	   		MACROS
+				;============================================================================
+
+				;============================================================================
+				; 			  P U B L I C   D A T A
+				;============================================================================
+
+				VXD_LOCKED_DATA_SEG
+ 00000000		     1	_LDATA	 SEGMENT
+
+				; flags for stats operations
+ = 00000001			UPDATESTATS	EQU		1
+ = 00000002			ZEROSTATS	EQU		2
+ = 00000003			UPDATEZEROSTATS	EQU		3
+
+
+				myRDTSC	MACRO
+					db	0Fh, 31h	; rdtsc
+					nop			; pad to 4 bytes long
+					nop			; pad to 4 bytes long
+					ENDM
+
+				; -------------------------------------------------------------------------
+				; Jump table for commands initiated by Devmon Windows program
+				; -------------------------------------------------------------------------
+ 00000000			Service_Table	label	dword
+ 00000000  000001F3 R			dd	offset32	ioctl_closehandle
+ 00000004  000001F8 R			dd	offset32	ioctl_getversion
+ 00000008  0000022B R			dd	offset32	ioctl_getstats
+ 0000000C  00000232 R			dd	offset32	ioctl_getzerostats
+ 00000010  000001FD R			dd	offset32	ioctl_zerostats
+ 00000014  0000028C R			dd	offset32	ioctl_hookservice
+ 00000018  0000033D R			dd	offset32	ioctl_unhookservice
+ 0000001C  0000039B R			dd	offset32	ioctl_getoverhead
+ 00000020 = 00000008		Service_Table_Size	EQU	($ - Service_Table) / 4
+
+
+				; -------------------------------------------------------------------------
+				; This points to the most recently called service.
+				; -------------------------------------------------------------------------
+				; max call stack depth
+ = 00000020			MRUMaxStack		EQU	32
+				; max amount by which we expect stack to grow during VxD calls
+ = 00000200			MRUMaxLocalStack	EQU	512
+
+				; size of this structure must be power of 2
+ 00000008			MRUService	STRUC
+ 00000000  00000000		MRU_Ordinal	DD	?
+ 00000004  00000000		MRU_SP		DD	?
+				MRUService	ENDS
+
+				; call stack
+ 00000020  00000020 [		MRUStack	MRUService	 MRUMaxStack dup (<?>)
+	    00000000
+	    00000000
+	   ]
+				; current call stack pointer
+ 00000120 00000000		MRUStackPtr	DD	0
+
+				; indicates if error on exit
+ 00000124 00000000		FixRetErr	DD	0
+
+				; -------------------------------------------------------------------------
+				; Use this to track error conditions
+				; -------------------------------------------------------------------------
+ 00000128 00000000		IoctlError	DD	0
+
+
+
+				; -------------------------------------------------------------------------
+				; This template defines the structure we allocate for each hooked service.
+				; It is customized for a particular service upon creation.
+				;
+				; We provide labels for all relocatable addresses so that we can adjust
+				; them when the template is instantiated.
+				; -------------------------------------------------------------------------
+
+ 0000012C			HookTemplate:
+ 0000012C  00000000			ServiceStats	<0,0,0,0,0,0,0>
+	   00000000
+	   00000000
+	   00000000
+	   00000000
+	   00000000
+	   00000000
+	   00000008 [
+	    00000000
+	   ]
+ 00000168 00000000		HookTemplatePrevHooker	dd	?
+ 0000016C = 00000044		HookTemplatePrevPtr	EQU offset32 $ + 4 - offset32 HookTemplate
+ 0000016C			BeginProc HookTemplateProc, Hook_Proc HookTemplatePrevHooker
+ 0000016C		     1		??0001:
+ 0000016C  EB 0A	     1		jmp short HookTemplateProc
+ 0000016E  FF 25 00000168 R  1		jmp [??0002]
+ 00000174 00000000	     1		??0000 dd  0
+ 00000178		     1		?prolog_HookTemplateProc label near
+ 00000178 00000178	     1	    HookTemplateProc proc near
+ 00000178  E8 00000000 R		call	MonEnter
+ 0000017D = 0000004D		HookTemplateMonEnter	EQU offset32 $ - offset32 HookTemplate - 4
+ 0000017D  FF 25 00000168 R		jmp	[HookTemplatePrevHooker]
+ 00000183 = 00000053		HookTemplatePrevHookerJmp EQU offset32 $ - offset32 HookTemplate - 4
+				EndProc HookTemplateProc
+ 00000183		     1	    HookTemplateProc endp
+					align	4
+ 00000184			HookTemplateEnd:
+
+ = 00000058			HookTemplateLen	EQU	(offset32 HookTemplateEnd - offset32 HookTemplate)
+ = 000007D0			MaxHooks	EQU	2000
+ = 0000002B			MaxPages	EQU	((HookTemplateLen * MaxHooks + 4095) / 4096)
+ 00000184 00000000		HookTable	dd	0
+ 00000188 00000000		HookFree	dd	0
+ 0000018C 00000000		HookUsed	dd	0
+
+
+				; -------------------------------------------------------------------------
+				; This template defines the structure we allocate to capture when a service
+				; returns.  It is customized for a particular service at the time the
+				; service is invoked.
+				; -------------------------------------------------------------------------
+ 00000190			RetTemplate:
+ 00000190  E8 00000049 R		call	MonExit
+ 00000195 = 00000005		RetTemplateHooker EQU	(offset32 $ - offset32 RetTemplate)
+ 00000195  00000000			dd	0	; pointer to hooker structure
+ 00000199 = 00000009		RetTemplateOrigAddr  EQU  (offset32 $ - offset32 RetTemplate)
+ 00000199  00000000			dd	0	; original return address
+ 0000019D = 0000000D		RetTemplateSP	EQU	(offset32 $ - offset32 RetTemplate)
+ 0000019D  00000000			dd	0	; pointer to return address on stack
+ 000001A1 = 00000011		RetTemplateTime EQU	(offset32 $ - offset32 RetTemplate)
+ 000001A1  00000000			dd	0
+ 000001A5  00000000			dd	0
+ 000001A9			RetTemplateEnd:
+
+ = 00000190			MaxReturn	EQU	400
+ = 00000019			RetTemplateLen	EQU	(offset32 RetTemplateEnd - offset32 RetTemplate)
+ = 00002EE0			RetTableSize	EQU	(MaxReturn * RetTemplateLen)
+
+ 000001A9  00002710 [		ReturnTable	db	(MaxReturn * RetTemplateLen) dup (?)
+	    00
+	   ]
+ 000028B9 000001A9 R		ReturnFree	dd	offset32 ReturnTable
+
+
+
+				VXD_LOCKED_DATA_ENDS
+ 000028BD 28BD		     1	_LDATA	 ENDS
+
+
+				;============================================================================
+				;	           D E V I C E   D E C L A R A T I O N
+				;============================================================================
+
+				VXD_LOCKED_CODE_SEG
+ 00000000		     1	_LTEXT	 SEGMENT
+ 00000000
+				DECLARE_VIRTUAL_DEVICE VXDMHLP,	\
+					VXDMHLP_MAJOR_VERSION, 	\
+					VXDMHLP_MINOR_VERSION,	\
+					VXDMHLP_Control, ,	\
+					UNDEFINED_INIT_ORDER
+ = 00000000		     1	    ??0003 EQU 0
+ = 00000000		     1	    ??0004 EQU 0
+ = 00000000		     1	    ??0005 EQU 0
+ = 00000000		     1	    ??0006    EQU 0
+ = 00000000		     1		??0007 EQU 0
+ 00000000 00000000	     2	_IDATA	SEGMENT
+ 00000000  0D 0A 44 5F 45    1	    db	0dh, 0ah, 'D_E_B_U_G===>'
+	   5F 42 5F 55 5F
+	   47 3D 3D 3D 3E
+ 0000000F  56 58 44 4D 48    1		db	"VXDMHLP", '<===', 0dh, 0ah
+	   4C 50 3C 3D 3D
+	   3D 0D 0A
+ 0000001C
+ 0000001C 00000000	     2	_IDATA	ENDS
+ 00000000
+ 00000000 000028BD	     2	_LDATA	 SEGMENT
+ 000028C0 00000000 040A	     1	VXDMHLP_DDB VxD_Desc_Block <,,,VXDMHLP_MAJOR_VERSION,VXDMHLP_MINOR_VERSION,,"VXDMHLP",UNDEFINED_INIT
+	   0000 01 00	     1	_ORDER,\
+	   0000
+	   00000001 [
+	    20504C484D445856
+	   ] 80000000
+	   000001B9 R
+	   00000000
+	   00000000
+	   00000000
+	   00000000
+	   00000000
+	   00000000
+	   00000000
+	   00000000
+	   50726576
+	   00000050
+	   52737631
+	   52737632
+	   52737633
+ 00002910
+ 00002910 00000000	     2	_LDATA	 ENDS
+ 00000000
+
+				;============================================================================
+				;			    M A I N   C O D E
+				;============================================================================
+
+
+				; -------------------------------------------------------------------------
+				; Called each time a service is invoked.
+				; -------------------------------------------------------------------------
+				BeginProc MonEnter
+ 00000000		     1		?prolog_MonEnter label near
+ 00000000 00000000	     1	    MonEnter proc near
+ 00000000  9C				pushfd
+
+					; disable interrupts so our timing computations aren't corrupted
+ 00000001  FA				cli
+
+ 00000002  56				push	esi
+ 00000003  57				push	edi
+ 00000004  50				push	eax
+ 00000005  52				push	edx
+
+					; get pointer to hook structure
+ 00000006  8B 74 24 14			mov	esi, [esp+20]		; get return address
+ 0000000A  81 EE 00000051		sub	esi, HookTemplateMonEnter + 4
+
+					; increment entry count
+ 00000010  FF 46 08			inc	[esi].SS_Enter
+
+					; allocate a return structure to replace original return with
+ 00000013  A1 000028B9 R		mov	eax, [ReturnFree]	; get location of return function
+ 00000018  8B 78 05			mov	edi, [eax].RetTemplateHooker	; get location of next on list
+ 0000001B  89 3D 000028B9 R		mov	[ReturnFree], edi	; update pointer to first on list
+
+					; change return address to point to us, fetch original return address
+ 00000021  8B F8			mov	edi, eax		; copy pointer to return structure
+ 00000023  87 44 24 18			xchg	[esp+24], eax		; store new return address, fetch old
+
+					; save original return address
+ 00000027  89 47 09			mov	[edi].RetTemplateOrigAddr, eax
+
+					; store service hooker address
+ 0000002A  89 77 05			mov	[edi].RetTemplateHooker, esi
+
+					; save address of return address on stack
+ 0000002D  8D 44 24 18			lea	eax, [esp+24]
+ 00000031  89 47 0D			mov	[edi].RetTemplateSP, eax
+
+					; do stuff for recording callers/callees
+ 00000034  E8 0000005C			call	MRUEnter
+
+					; update time spent in function (do as late as possible)
+ 00000039			rdts1:	myRDTSC					; edx:eax = rdtsc
+ 00000039  0F 31	     1		db	0Fh, 31h	; rdtsc
+ 0000003B  90		     1		nop			; pad to 4 bytes long
+ 0000003C  90		     1		nop			; pad to 4 bytes long
+ 0000003D  89 47 11			mov	[edi].RetTemplateTime, eax	; store time low
+ 00000040  89 57 15			mov	[edi].RetTemplateTime+4, edx	; store time high
+
+ 00000043  5A				pop	edx
+ 00000044  58				pop	eax
+ 00000045  5F				pop	edi
+ 00000046  5E				pop	esi
+ 00000047  9D				popfd
+ 00000048  C3				ret
+				EndProc	MonEnter
+ 00000049		     1	    MonEnter endp
+ 00000049
+
+
+				; -------------------------------------------------------------------------
+				; Called each time a service returns from invocation.
+				; -------------------------------------------------------------------------
+				BeginProc MonExit
+ 00000049		     1		?prolog_MonExit label near
+ 00000049 00000049	     1	    MonExit proc near
+ 00000049  9C				pushfd
+ 0000004A  56				push	esi
+ 0000004B  57				push	edi
+ 0000004C  50				push	eax
+ 0000004D  52				push	edx
+
+					; disable interrupts so our timing computations aren't corrupted
+ 0000004E  FA				cli
+
+					; get pointer to original structure
+ 0000004F  8B 7C 24 14			mov	edi, [esp+20]			; return address
+ 00000053  81 EF 00000005		sub	edi, RetTemplateHooker		; point to front of return template
+ 00000059  8B 77 05			mov	esi, [edi].RetTemplateHooker	; get hooker structure pointer
+
+					; update time spent in function (do as early as possible)
+ 0000005C			rdts2:	myRDTSC					; edx:eax = rdtsc
+ 0000005C  0F 31	     1		db	0Fh, 31h	; rdtsc
+ 0000005E  90		     1		nop			; pad to 4 bytes long
+ 0000005F  90		     1		nop			; pad to 4 bytes long
+ 00000060  2B 47 11			sub	eax, [edi].RetTemplateTime
+ 00000063  1B 57 15			sbb	edx, [edi].RetTemplateTime+4
+ 00000066  01 46 10			add	[esi].SS_TimeLo, eax		; add time low
+ 00000069  11 56 14			adc	[esi].SS_TimeHi, edx		; add time high
+
+					; replace our return address with original
+ 0000006C  8B 57 09			mov	edx, [edi].RetTemplateOrigAddr
+ 0000006F  89 54 24 14			mov	[esp+20], edx			; replace return address
+
+					; increment exit count
+ 00000073  FF 46 0C			inc	[esi].SS_Exit
+
+					; make return address structure available to someone else
+ 00000076  33 D2			xor	edx, edx
+ 00000078  89 57 0D			mov	[edi].RetTemplateSP, edx	; mark as unused
+ 0000007B  8B 15 000028B9 R		mov	edx, [ReturnFree]		; get base list pointer
+ 00000081  89 57 05			mov	[edi].RetTemplateHooker, edx	; set link pointer to base
+
+					; now finalize freeing the structure
+ 00000084  89 3D 000028B9 R		mov	[ReturnFree], edi		; set base list pointer to ours
+
+					; do stuff for recording callers/callees
+ 0000008A  E8 00000064			call	MRUExit
+
+ 0000008F  5A				pop	edx
+ 00000090  58				pop	eax
+ 00000091  5F				pop	edi
+ 00000092  5E				pop	esi
+ 00000093  9D				popfd
+ 00000094  C3				ret
+				EndProc	MonExit
+ 00000095		     1	    MonExit endp
+ 00000095
+
+
+				BeginProc	MRUEnter
+ 00000095		     1		?prolog_MRUEnter label near
+ 00000095 00000095	     1	    MRUEnter proc near
+					; if stack is currently empty, only put us on it
+ 00000095  A1 00000120 R		mov	eax, MRUStackPtr
+ 0000009A  0B C0			or	eax, eax
+ 0000009C  74 3C			jz	mru_enter_reset
+
+					; ensure we're using same stack as MRU
+					; check if esp is larger than last
+ 0000009E  05 00000018 R		add	eax, offset32 MRUStack - size MRUService
+ 000000A3  8B 50 04			mov	edx, [eax].MRU_SP
+ 000000A6  2B D4			sub	edx, esp
+ 000000A8  74 30			je	mru_enter_reset
+					; check if esp is much smaller than last
+ 000000AA  81 FA 00000200		cmp	edx, MRUMaxLocalStack
+ 000000B0  7F 28			jg	mru_enter_reset
+
+					; indicate that we were called by MRU service
+ 000000B2  8B 56 18			mov	edx, [esi].SS_CallerPtr		; get position to save caller
+ 000000B5  FF 30			push	[eax].MRU_Ordinal		; get last called service
+ 000000B7  8F 44 96 1C			pop	[esi+edx*4].SS_Caller		; save caller
+ 000000BB  42				inc	edx
+ 000000BC  83 E2 07			and	edx, CALLER_CNT-1
+ 000000BF  89 56 18			mov	[esi].SS_CallerPtr, edx		; update caller pointer
+
+					; update MRU call stack
+ 000000C2  8B 16			mov	edx, [esi].SS_Ordinal
+ 000000C4  89 50 08			mov	[eax+size MRUService].MRU_Ordinal, edx
+ 000000C7  89 60 0C			mov	[eax+size MRUService].MRU_SP, esp
+
+					; update stack pointer location
+ 000000CA  2D 00000010 R		sub	eax, offset32 MRUStack - 2 * size MRUService
+ 000000CF  25 000000F8			and	eax, (MRUMaxStack-1) * size MRUService
+ 000000D4  A3 00000120 R		mov	MRUStackPtr, eax
+
+					; all done
+ 000000D9  C3				ret
+
+ 000000DA			mru_enter_reset:
+					; reset mru stack to be empty
+ 000000DA  B8 00000008			mov	eax, size MRUService
+ 000000DF  A3 00000120 R		mov	MRUStackPtr, eax
+					; make us the only thing on the stack
+ 000000E4  8B 16			mov	edx, [esi].SS_Ordinal
+ 000000E6  89 15 00000020 R		mov	MRUStack.MRU_Ordinal, edx
+ 000000EC  89 25 00000024 R		mov	MRUStack.MRU_SP, esp
+					; all done
+ 000000F2  C3				ret
+				EndProc	MRUEnter
+ 000000F3		     1	    MRUEnter endp
+ 000000F3
+
+				BeginProc	MRUExit
+ 000000F3		     1		?prolog_MRUExit label near
+ 000000F3 000000F3	     1	    MRUExit proc near
+					; get pointer to top item on call stack
+ 000000F3  A1 00000120 R		mov	eax, MRUStackPtr		; eax = last stack entry
+ 000000F8  0B C0			or	eax, eax
+ 000000FA  74 1A			jz	mru_exit_empty			; stack is empty
+					; ensure that it is us
+ 000000FC  83 E8 08			sub	eax, size MRUService		; back down to previous item
+ 000000FF  8B 90 00000020 R		mov	edx, [MRUStack+eax].MRU_Ordinal
+ 00000105  39 16			cmp	[esi].SS_Ordinal, edx
+ 00000107  75 06			jne	mru_exit_reset			; who knows how we got here?
+					; update stack pointer location
+ 00000109  A3 00000120 R		mov	MRUStackPtr, eax
+					; all done
+ 0000010E  C3				ret
+ 0000010F			mru_exit_reset:
+ 0000010F  33 C0			xor	eax, eax
+ 00000111  A3 00000120 R		mov	MRUStackPtr, eax
+ 00000116			mru_exit_empty:
+					; all done
+ 00000116  C3				ret
+				EndProc	MRUExit
+ 00000117		     1	    MRUExit endp
+ 00000117
+
+
+				; -------------------------------------------------------------------------
+				; Initialize the linked list of hooks for hooked services.
+				; These are created using the HookTemplate.
+				; -------------------------------------------------------------------------
+				BeginProc InitHookTable
+ 00000117		     1		?prolog_InitHookTable label near
+ 00000117 00000117	     1	    InitHookTable proc near
+					; Allocate space for hook functions and statistics.
+					; We initialize enough memory to hook tons of services, but
+					; lock only the portion we need, allowing most to be paged out.
+					VMMcall	_PageAllocate, <MaxPages, PG_SYS, 0, 0, 0, 0, 0, PAGEZEROINIT>
+ 00000117  6A 01	     6		push	PAGEZEROINIT
+ 00000119  6A 00	     6		push	0
+ 0000011B  6A 00	     6		push	0
+ 0000011D  6A 00	     6		push	0
+ 0000011F  6A 00	     6		push	0
+ 00000121  6A 00	     6		push	0
+ 00000123  6A 01	     6		push	PG_SYS
+ 00000125  68 0000002B	     6		push	MaxPages
+ 0000012A  CD 20	     2	    int Dyna_Link_Int
+ 0000012C  00010053	     3	    dd	@@_PageAllocate+0
+ 00000130  83 C4 20	     3		  add esp,??_argc * 4
+ 00000133  A3 00000184 R		mov	[HookTable], eax		; save table pointer
+ 00000138  8B F8			mov	edi, eax
+ 0000013A  89 3D 00000188 R		mov	[HookFree], edi			; set pointer to first
+ 00000140  8D 35 0000012C R		lea	esi, HookTemplate
+ 00000146  B9 000007D0			mov	ecx, MaxHooks
+ 0000014B  2B C6			sub	eax, esi
+ 0000014D  FC				cld
+ 0000014E			init_hook_loop:
+ 0000014E  8B D1			mov	edx, ecx
+					; Copy template
+ 00000150  B9 00000058			mov	ecx, HookTemplateLen
+ 00000155  F3/ A4			rep movsb
+ 00000157  81 EE 00000058		sub	esi, HookTemplateLen
+					; Fix up relocatable items
+ 0000015D  89 7F AC			mov	[edi-HookTemplateLen].SS_Next, edi	; set pointer to next
+ 00000160  29 47 F5			sub	[edi-HookTemplateLen].HookTemplateMonEnter, eax
+ 00000163  01 47 FB			add	[edi-HookTemplateLen].HookTemplatePrevHookerJmp, eax
+ 00000166  01 47 EC			add	[edi-HookTemplateLen].HookTemplatePrevPtr, eax
+
+ 00000169  05 00000058			add	eax, HookTemplateLen
+ 0000016E  8B CA			mov	ecx, edx
+ 00000170  E2 DC			loop	init_hook_loop
+ 00000172  33 C9			xor	ecx, ecx
+ 00000174  89 4F AC			mov	[edi-HookTemplateLen].SS_Next, ecx	; set pointer to next
+ 00000177  C3				ret
+				EndProc InitHookTable
+ 00000178		     1	    InitHookTable endp
+ 00000178
+
+				; -------------------------------------------------------------------------
+				; Initialize the linked list of return points for invoked functions.
+				; These are created using the RetTemplate.
+				; -------------------------------------------------------------------------
+				BeginProc InitReturnTable
+ 00000178		     1		?prolog_InitReturnTable label near
+ 00000178 00000178	     1	    InitReturnTable proc near
+ 00000178  8D 3D 000001A9 R		lea	edi, ReturnTable
+ 0000017E  89 3D 000028B9 R		mov	[ReturnFree], edi		; set pointer to first
+ 00000184  8D 35 00000190 R		lea	esi, RetTemplate
+ 0000018A  B9 00000190			mov	ecx, MaxReturn
+ 0000018F  B8 00000019			mov	eax, offset32 ReturnTable - offset32 RetTemplate
+ 00000194  FC				cld
+ 00000195			init_return_loop:
+ 00000195  8B D1			mov	edx, ecx
+ 00000197  B9 00000019			mov	ecx, RetTemplateLen
+ 0000019C  F3/ A4			rep movsb
+ 0000019E  81 EE 00000019		sub	esi, RetTemplateLen
+ 000001A4  89 7F EC			mov	[edi-RetTemplateLen+RetTemplateHooker], edi	; set pointer to next
+ 000001A7  29 47 E8			sub	[edi-RetTemplateLen+RetTemplateHooker-4], eax	; adjust call address
+ 000001AA  05 00000019			add	eax, RetTemplateLen
+ 000001AF  8B CA			mov	ecx, edx
+ 000001B1  E2 E2			loop	init_return_loop
+ 000001B3  33 C9			xor	ecx, ecx
+ 000001B5  89 4F EC			mov	[edi-RetTemplateLen+RetTemplateHooker], ecx	; set pointer to next
+ 000001B8  C3				ret
+				EndProc InitReturnTable
+ 000001B9		     1	    InitReturnTable endp
+
+
+
+				;============================================================================
+				;
+				; VXDMHLP_Control - Device control procedure for the VxD. Dispatches all
+				;                  Windows VxD messages.
+				;
+				; Exit:	If carry clear then
+				;	    Successful
+				;	else
+				;	    Control call failed
+				;
+				; Destroys: EAX, EBX, ECX, EDX, ESI, EDI, Flags
+				;
+				;============================================================================
+
+				public VXDMHLP_Control
+ 000001B9			VXDMHLP_Control PROC NEAR
+
+					Control_Dispatch SYS_DYNAMIC_DEVICE_INIT,	VXDMHLP_Device_Init
+ 000001B9  83 F8 1B	     1	    cmp eax, SYS_DYNAMIC_DEVICE_INIT
+ 000001BC  0F 84 00000038 R  1	    jz	VXDMHLP_Device_Init
+					Control_Dispatch SYS_DYNAMIC_DEVICE_EXIT,	VXDMHLP_Device_Exit
+ 000001C2  83 F8 1C	     1	    cmp eax, SYS_DYNAMIC_DEVICE_EXIT
+ 000001C5  0F 84 0000025C    1	    jz	VXDMHLP_Device_Exit
+					Control_Dispatch W32_DEVICEIOCONTROL,		VXDMHLP_ioctl
+ 000001CB  83 F8 23	     1	    cmp eax, W32_DEVICEIOCONTROL
+ 000001CE  74 02	     1	    jz	VXDMHLP_ioctl
+ 000001D0  F8				clc
+ 000001D1  C3				ret
+
+ 000001D2			VXDMHLP_Control ENDP
+
+
+				;============================================================================
+				;
+				; VXDMHLP_ioctl - Respond to IOcontrol messages sent by Win32 program.
+				;
+				; Entry: esi -> DIOC block
+				; 
+				; Exit:
+				;
+				;============================================================================
+
+ 000001D2			Public VXDMHLP_ioctl
+				BeginProc VXDMHLP_ioctl
+ 000001D2		     1		?prolog_VXDMHLP_ioctl label near
+ 000001D2 000001D2	     1	    VXDMHLP_ioctl proc near
+
+ 000001D2  C7 05 00000128 R		mov	IoctlError, VXDMHLP_ERROR_NOSUCHSERVICE
+	   00000001
+ 000001DC  8B 4E 0C			mov	ecx,[esi].dwIoControlCode	; get ioctl code
+ 000001DF  41				inc	ecx				; base is -1
+ 000001E0  81 F9 00000008		cmp	ecx, Service_Table_Size		; out of bounds ?
+ 000001E6  0F 83 00000234		jae	ioctl_failure			; y: bad code, exit
+ 000001EC  FF 24 8D			jmp	Service_Table[4*ecx]		; index into table
+	   00000000 R
+
+				; -------------------------------------------------------------------------
+				; -------------------------------------------------------------------------
+ 000001F3			ioctl_closehandle:
+					; Nothing to do for this
+ 000001F3  E9 00000224			jmp	ioctl_success		; exit successfully
+
+				; -------------------------------------------------------------------------
+				; -------------------------------------------------------------------------
+ 000001F8			ioctl_getversion:
+					; Nothing to do for this
+ 000001F8  E9 0000021F			jmp	ioctl_success		; exit successfully
+
+				; -------------------------------------------------------------------------
+				; Get the statistics we've collected for all hooked services
+				; -------------------------------------------------------------------------
+
+ 000001FD			ioctl_zerostats:
+ 000001FD  BB 00000002			mov	ebx, ZEROSTATS			; zero the stats, no update
+ 00000202  8B 15 0000018C R		mov	edx, [HookUsed]
+ 00000208  FC				cld
+ 00000209			ioctl_dozero:
+					; check for end of list
+ 00000209  83 FA 00			cmp	edx, 0
+ 0000020C  0F 84 0000020A		je	ioctl_success
+
+					; zero volatile statistics
+ 00000212  FA				cli
+ 00000213  56				push	esi
+ 00000214  8D 32			lea	esi, [edx]			; get stats pointer
+ 00000216  33 C0			xor	eax, eax
+ 00000218  89 46 08			mov	[esi].SS_Enter,  eax
+ 0000021B  89 46 0C			mov	[esi].SS_Exit,   eax
+ 0000021E  89 46 10			mov	[esi].SS_TimeLo, eax
+ 00000221  89 46 14			mov	[esi].SS_TimeHi, eax
+ 00000224  FB				sti
+ 00000225  5E				pop	esi
+					; move to next service
+ 00000226  8B 52 04			mov	edx, [edx].SS_Next
+ 00000229  EB DE			jmp	ioctl_dozero
+
+				; get stats with no zero
+
+ 0000022B			ioctl_getstats:
+ 0000022B  BB 00000001			mov	ebx, UPDATESTATS		; update with no clear
+ 00000230  EB 05			jmp	ioctl_scanstats
+
+				; get stats and reset
+
+ 00000232			ioctl_getzerostats:
+ 00000232  BB 00000003			mov	ebx, UPDATEZEROSTATS		; update and zero stats
+
+ 00000237			ioctl_scanstats:
+					; zero current output size
+ 00000237  33 C0			xor	eax, eax
+ 00000239  8B 4E 20			mov	ecx, [esi].lpcbBytesReturned
+ 0000023C  89 01			mov	[ecx], eax
+					; get pointer to source and destination buffers
+ 0000023E  8B 15 0000018C R		mov	edx, [HookUsed]
+ 00000244  8B 7E 18			mov	edi, [esi].lpvOutBuffer
+					; iterate over structures in use, copying
+ 00000247  FC				cld
+ 00000248			ioctl_docopy:
+					; check for end of list
+ 00000248  83 FA 00			cmp	edx, 0
+ 0000024B  0F 84 000001CB		je	ioctl_success
+
+					; update size of output and exit if buffer full
+ 00000251  8B 4E 20			mov	ecx, [esi].lpcbBytesReturned	; get output size pointer
+ 00000254  8B 01			mov	eax, [ecx]			; get current output size
+ 00000256  83 C0 3C			add	eax, size ServiceStats		; update total size
+ 00000259  3B 46 1C			cmp	eax, [esi].cbOutBuffer		; less than max output size ?
+ 0000025C  0F 8F 000001BA		jg	ioctl_success
+ 00000262  89 01			mov	[ecx], eax			; update output size
+					; copy stats to output buffer
+ 00000264  56				push	esi
+ 00000265  B9 0000000F			mov	ecx, size ServiceStats / 4
+ 0000026A  8D 32			lea	esi, [edx]			; get stats pointer
+ 0000026C  FA				cli
+ 0000026D  F3/ A5			rep movsd
+
+ 0000026F  F7 C3 00000002		test	ebx, ZEROSTATS
+ 00000275  74 0E			je	nozero
+
+					; zero volatile statistics
+ 00000277  33 C0			xor	eax, eax
+ 00000279  89 46 CC			mov	[esi - size ServiceStats].SS_Enter,  eax
+ 0000027C  89 46 D0			mov	[esi - size ServiceStats].SS_Exit,   eax
+ 0000027F  89 46 D4			mov	[esi - size ServiceStats].SS_TimeLo, eax
+ 00000282  89 46 D8			mov	[esi - size ServiceStats].SS_TimeHi, eax
+ 00000285			nozero:
+ 00000285  FB				sti
+ 00000286  5E				pop	esi
+					; move to next service
+ 00000287  8B 52 04			mov	edx, [edx].SS_Next
+ 0000028A  EB BC			jmp	ioctl_docopy
+
+				; -------------------------------------------------------------------------
+				; Hook a new service
+				; -------------------------------------------------------------------------
+ 0000028C			ioctl_hookservice:
+					; get ordinal of interest
+ 0000028C  8B 46 10			mov	eax, [esi].lpvInBuffer
+ 0000028F  8B 00			mov	eax, [eax]
+ 00000291			internal_hookservice:
+					; ensure that the vxd is loaded
+ 00000291  C7 05 00000128 R		mov	IoctlError, VXDMHLP_ERROR_NOSUCHVXD
+	   00000007
+ 0000029B  8B D0			mov	edx, eax		; save ordinal
+ 0000029D  C1 E8 10			shr	eax, 16			; get device id
+ 000002A0  0F 84 0000017A		jz	ioctl_failure		; if zero, we lose
+					VMMCall	Get_DDB			; check for DDB
+ 000002A6  CD 20	     2	    int Dyna_Link_Int
+ 000002A8  00010146	     3	    dd	@@Get_DDB+0
+ 000002AC  0B C9			or	ecx, ecx
+ 000002AE  0F 84 0000016C		jz	ioctl_failure		; if result zero, we lose
+ 000002B4  8B C2			mov	eax, edx		; restore ordinal
+					; get a hook structure
+ 000002B6  C7 05 00000128 R		mov	IoctlError, VXDMHLP_ERROR_OUTOFMEMORY
+	   00000002
+ 000002C0  8B 3D 00000188 R		mov	edi, [HookFree]
+ 000002C6  83 FF 00			cmp	edi, 0
+ 000002C9  0F 84 00000151		je	ioctl_failure	; no structures available
+					; Ensure the page containing the structure is locked in memory.
+					; We rely on the fact that a page can be locked multiple times.
+ 000002CF  C7 05 00000128 R		mov	IoctlError, VXDMHLP_ERROR_PAGELOCK
+	   00000003
+ 000002D9  50				push	eax
+ 000002DA  8B C7			mov	eax, edi
+ 000002DC  C1 E8 0C			shr	eax, 12
+					VMMcall _LinPageLock, <eax, 1, 0>
+ 000002DF  6A 00	     6		push	0
+ 000002E1  6A 01	     6		push	1
+ 000002E3  50		     6		push	eax
+ 000002E4  CD 20	     2	    int Dyna_Link_Int
+ 000002E6  00010063	     3	    dd	@@_LinPageLock+0
+ 000002EA  83 C4 0C	     3		  add esp,??_argc * 4
+ 000002ED  0B C0			or	eax, eax	; nonzero if locked, zero if error
+ 000002EF  58				pop	eax
+ 000002F0  0F 84 0000012A		jz	ioctl_failure
+					; fill in service-specific info in structure
+ 000002F6  89 07			mov	[edi].SS_Ordinal, eax
+ 000002F8  33 D2			xor	edx, edx
+ 000002FA  89 57 08			mov	[edi].SS_Enter,  edx
+ 000002FD  89 57 0C			mov	[edi].SS_Exit,   edx
+ 00000300  89 57 10			mov	[edi].SS_TimeLo, edx
+ 00000303  89 57 14			mov	[edi].SS_TimeHi, edx
+					; hook the service
+ 00000306  C7 05 00000128 R		mov	IoctlError, VXDMHLP_ERROR_HOOK
+	   00000005
+ 00000310  56				push	esi
+ 00000311  8D 77 4C			lea	esi, [edi +(offset32 HookTemplateProc - offset32 HookTemplate)]
+					VMMCall	Hook_Device_Service
+ 00000314  CD 20	     2	    int Dyna_Link_Int
+ 00000316  00010090	     3	    dd	@@Hook_Device_Service+0
+ 0000031A  5E				pop	esi
+ 0000031B  0F 82 000000FF		jc	ioctl_failure
+					; update pointer to next available structure
+ 00000321  8B 57 04			mov	edx, [edi].SS_Next
+ 00000324  89 15 00000188 R		mov	[HookFree], edx
+					; add to list of hooked services
+ 0000032A  A1 0000018C R		mov	eax, [HookUsed]
+ 0000032F  89 47 04			mov	[edi].SS_Next, eax
+ 00000332  89 3D 0000018C R		mov	[HookUsed], edi
+ 00000338  E9 000000DF			jmp	ioctl_success
+
+				; -------------------------------------------------------------------------
+				; Unhook a service
+				; -------------------------------------------------------------------------
+ 0000033D			ioctl_unhookservice:
+					; get ordinal of interest
+ 0000033D  8B 46 10			mov	eax, [esi].lpvInBuffer
+ 00000340  8B 00			mov	eax, [eax]
+ 00000342			internal_unhookservice:
+					; locate hook structure
+ 00000342  8D 15 0000018C R		lea	edx, [HookUsed]
+ 00000348  8B 3A			mov	edi, [edx]
+ 0000034A  C7 05 00000128 R		mov	IoctlError, VXDMHLP_ERROR_NOTFOUND
+	   00000004
+ 00000354			unhooksearch:
+ 00000354  83 FF 00			cmp	edi, 0
+ 00000357  0F 84 000000C3		je	ioctl_failure
+ 0000035D  39 07			cmp	[edi].SS_Ordinal, eax
+ 0000035F  74 07			je	unhookfound
+ 00000361  8D 57 04			lea	edx, [edi].SS_Next
+ 00000364  8B 3A			mov	edi, [edx]
+ 00000366  EB EC			jmp	unhooksearch
+ 00000368			unhookfound:
+					; unhook service
+ 00000368  C7 05 00000128 R		mov	IoctlError, VXDMHLP_ERROR_UNHOOK
+	   00000006
+ 00000372  56				push	esi
+ 00000373  8D 77 4C			lea	esi, [edi +(offset32 HookTemplateProc - offset32 HookTemplate)]
+					VMMCall Unhook_Device_Service
+ 00000376  CD 20	     2	    int Dyna_Link_Int
+ 00000378  0001011C	     3	    dd	@@Unhook_Device_Service+0
+ 0000037C  5E				pop	esi
+ 0000037D  0F 82 0000009D		jc	ioctl_failure
+					; remove from list of used hook structures
+ 00000383  8B 47 04			mov	eax, [edi].SS_Next
+ 00000386  89 02			mov	[edx], eax
+					; add to list of free hook structures
+ 00000388  A1 00000188 R		mov	eax, [HookFree]
+ 0000038D  89 47 04			mov	[edi].SS_Next, eax
+ 00000390  89 3D 00000188 R		mov	[HookFree], edi
+ 00000396  E9 00000081			jmp	ioctl_success
+
+				; -------------------------------------------------------------------------
+				; Compute monitoring overhead
+				; -------------------------------------------------------------------------
+ 0000039B			ioctl_getoverhead:
+ 0000039B  56				push	esi
+					; save current time
+ 0000039C			rdts3:	myRDTSC				; edx:eax = rdtsc
+ 0000039C  0F 31	     1		db	0Fh, 31h	; rdtsc
+ 0000039E  90		     1		nop			; pad to 4 bytes long
+ 0000039F  90		     1		nop			; pad to 4 bytes long
+ 000003A0  50				push	eax
+					; call Get_VMM_Version 128 times
+ 000003A1  BE 00000080			mov	esi, 128
+ 000003A6			unhooked_time_loop:
+					VxDCall	Get_VMM_Version
+ 000003A6  CD 20	     1	    int Dyna_Link_Int
+ 000003A8  00010000	     2	    dd	@@Get_VMM_Version+0
+ 000003AC  4E				dec	esi
+ 000003AD  75 F7			jnz	unhooked_time_loop
+					; save current time
+ 000003AF			rdts4:	myRDTSC				; edx:eax = rdtsc
+ 000003AF  0F 31	     1		db	0Fh, 31h	; rdtsc
+ 000003B1  90		     1		nop			; pad to 4 bytes long
+ 000003B2  90		     1		nop			; pad to 4 bytes long
+ 000003B3  50				push	eax
+					; hook Get_VMM_Version.  This should always be possible.
+					GetVxDServiceOrdinal eax, Get_VMM_Version
+ 000003B4  B8 00010000	     1	    mov eax,@@Get_VMM_Version
+ 000003B9  E8 FFFFFED3			call	internal_hookservice
+ 000003BE  72 60			jc	ioctl_failure
+					; call it 128 times
+ 000003C0  BE 00000080			mov	esi, 128
+ 000003C5			hooked_time_loop:
+					VxDCall	Get_VMM_Version
+ 000003C5  CD 20	     1	    int Dyna_Link_Int
+ 000003C7  00010000	     2	    dd	@@Get_VMM_Version+0
+ 000003CB  4E				dec	esi
+ 000003CC  75 F7			jnz	hooked_time_loop
+					; get the time we've recorded
+ 000003CE  8D 15 0000018C R		lea	edx, [HookUsed]
+ 000003D4  8B 3A			mov	edi, [edx]
+ 000003D6			ovrsearch:
+ 000003D6  81 3F 00010000		cmp	[edi].SS_Ordinal, 10000h
+ 000003DC  74 07			je	ovrfound
+ 000003DE  8D 57 04			lea	edx, [edi].SS_Next
+ 000003E1  8B 3A			mov	edi, [edx]
+ 000003E3  EB F1			jmp	ovrsearch
+ 000003E5			ovrfound:	
+ 000003E5  6A 00			pushd	0
+ 000003E7  8B 47 10			mov	eax, [edi].SS_TimeLo
+ 000003EA  50				push	eax
+					; unhook it
+					GetVxDServiceOrdinal eax, Get_VMM_Version
+ 000003EB  B8 00010000	     1	    mov eax,@@Get_VMM_Version
+ 000003F0  E8 FFFFFF4D			call	internal_unhookservice
+					; now compute the time difference, overhead = (t4-t3)-(t2-t1)
+ 000003F5  8B 04 24			mov	eax, [esp]
+ 000003F8  2B 44 24 04			sub	eax, [esp+4]
+ 000003FC  2B 44 24 08			sub	eax, [esp+8]
+ 00000400  03 44 24 0C			add	eax, [esp+12]
+ 00000404  83 C4 10			add	esp, 4*4
+					; eax now contains the overhead for 128 calls
+ 00000407  C1 E8 07			shr	eax, 7
+					; save overhead per call
+ 0000040A  5E				pop	esi
+ 0000040B  8B 56 18			mov	edx, [esi].lpvOutBuffer	
+ 0000040E  89 02			mov	[edx], eax
+					; set size of output buffer
+ 00000410  8B 56 20			mov	edx, [esi].lpcbBytesReturned	; get output size pointer
+ 00000413  B8 00000004			mov	eax, 4
+ 00000418  89 02			mov	[edx], eax
+ 0000041A  EB 00			jmp	ioctl_success
+
+ 0000041C			ioctl_success:
+ 0000041C  33 C0			xor	eax, eax			; return zero = success
+ 0000041E  F8				clc
+ 0000041F  C3				ret
+
+ 00000420			ioctl_failure:
+ 00000420  A1 00000128 R		mov	eax, IoctlError
+ 00000425  F9				stc
+ 00000426  C3				ret
+
+				EndProc	VXDMHLP_ioctl
+ 00000427		     1	    VXDMHLP_ioctl endp
+
+
+				;============================================================================
+				;
+				; VXDMHLP_Device_Exit - Cleans up any hooks that are still installed before
+				;		    exiting.
+				;
+				;============================================================================
+
+ 00000427			Public VXDMHLP_Device_Exit
+				BeginProc VXDMHLP_Device_Exit
+ 00000427		     1		?prolog_VXDMHLP_Device_Exit label near
+ 00000427 00000427	     1	    VXDMHLP_Device_Exit proc near
+
+					; clear error condition
+ 00000427  C7 05 00000124 R		mov	FixRetErr, 0
+	   00000000
+
+					; iterate until no more services are hooked
+ 00000431			unhookall_loop:
+ 00000431  8B 3D 0000018C R		mov	edi, [HookUsed]
+					; check for end of list
+ 00000437  83 FF 00			cmp	edi, 0
+ 0000043A  74 2B			je	unhookall_done
+					; unhook the service
+ 0000043C  8B 07			mov	eax, [edi].SS_Ordinal
+ 0000043E  E8 FFFFFEFF			call	internal_unhookservice
+ 00000443  73 EC			jnc	unhookall_loop
+ 00000445  83 3D 00000128 R		cmp	IoctlError, VXDMHLP_ERROR_UNHOOK
+	   06
+ 0000044C  75 0A			jne	unhookdel
+					; major error - can't unload
+ 0000044E  C7 05 00000124 R		mov	FixRetErr, 1
+	   00000001
+
+ 00000458			unhookdel:
+					; It wasn't found on the list.  Just delete it and move on.
+ 00000458  A1 0000018C R		mov	eax, [HookUsed]
+ 0000045D  8B 47 04			mov	eax, [edi].SS_Next
+ 00000460  A3 0000018C R		mov	[HookUsed], eax
+ 00000465  EB CA			jmp	unhookall_loop
+ 00000467			unhookall_done:
+
+					; Locate all VxD calls that haven't yet returned, and change their
+					; stack so they return to their original callers instead of MonExit.
+ 00000467  8D 3D 000001A9 R		lea	edi, ReturnTable
+ 0000046D  B9 00000190			mov	ecx, MaxReturn
+ 00000472			fixret_loop:
+					; iterate over return structures
+ 00000472  8B 47 0D			mov	eax, [edi].RetTemplateSP	; fetch stack pointer
+ 00000475  0B C0			or	eax, eax			; check if in use
+ 00000477  74 3C			jz	fixret_continue
+					; ensure stack is still in use (heuristic approach)
+ 00000479  C1 E8 0C			shr	eax, 12
+ 0000047C  51				push	ecx
+					VMMcall	_PageCheckLinRange, <eax, 1, 0>
+ 0000047D  6A 00	     6		push	0
+ 0000047F  6A 01	     6		push	1
+ 00000481  50		     6		push	eax
+ 00000482  CD 20	     2	    int Dyna_Link_Int
+ 00000484  00010067	     3	    dd	@@_PageCheckLinRange+0
+ 00000488  83 C4 0C	     3		  add esp,??_argc * 4
+ 0000048B  59				pop	ecx
+ 0000048C  0B C0			or	eax, eax
+ 0000048E  74 25			jz	fixret_continue
+ 00000490  FA				cli
+ 00000491  8B 47 0D			mov	eax, [edi].RetTemplateSP	; fetch stack pointer
+
+					; make sure it points at a return template
+ 00000494  8B 10			mov	edx, [eax]			; get return address
+ 00000496  81 EA 000001A9 R		sub	edx, offset32 ReturnTable
+ 0000049C  81 FA 00002EE0		cmp 	edx, RetTableSize		; within return table?
+ 000004A2  72 0C			jb	fixret_okay
+ 000004A4  C7 05 00000124 R		mov	FixRetErr, 1
+	   00000001
+ 000004AE  EB 05			jmp	fixret_continue
+					
+ 000004B0			fixret_okay:
+					; patch return address
+ 000004B0  8B 57 09			mov	edx, [edi].RetTemplateOrigAddr	; fetch original return addr
+ 000004B3  89 10			mov	[eax], edx			; restore original return addr
+ 000004B5			fixret_continue:
+ 000004B5  FB				sti
+ 000004B6  81 C7 00000019		add	edi, RetTemplateLen
+ 000004BC  E2 B4			loop	fixret_loop
+
+					; Free the memory we were using if no errors
+ 000004BE  F9				stc
+ 000004BF  83 3D 00000124 R		cmp 	FixRetErr, 1			; clears carry???
+	   01
+ 000004C6  74 12			je	nofree
+					VMMcall	_PageFree, <[HookTable], 0>
+ 000004C8  6A 00	     6		push	0
+ 000004CA  FF 35 00000184 R  6		push	[HookTable]
+ 000004D0  CD 20	     2	    int Dyna_Link_Int
+ 000004D2  00010055	     3	    dd	@@_PageFree+0
+ 000004D6  83 C4 08	     3		  add esp,??_argc * 4
+ 000004D9  F8				clc
+ 000004DA			nofree:
+ 000004DA  C3				ret
+
+				EndProc VXDMHLP_Device_Exit
+ 000004DB		     1	    VXDMHLP_Device_Exit endp
+ 000004DB
+				VXD_LOCKED_CODE_ENDS
+ 000004DB 04DB		     1	_LTEXT	 ENDS
+
+
+
+
+
+
+				;============================================================================
+				;	   D E V I C E   I N I T I A L I Z A T I O N   C O D E
+				;============================================================================
+
+				VXD_ICODE_SEG
+ 00000000		     1	_ITEXT	SEGMENT
+
+				;============================================================================
+				;									
+				; VXDMHLP_Device_Init - VXDMHLP Initialization 	
+				;									
+				;									
+				; Entry: ebx -> System VM handle (not used)
+				;        edx -> Reference data from real mode init portion
+				;
+				; Exit: If successful then
+				;           Carry flag is clear
+				;       else
+				;           Carry flag is set to indicate an error -- Device not initialized
+				;
+				;============================================================================
+
+ 00000000 56 78 44 20 4D	VXDMHLPCaption	db	"VxD Monitor",0
+	   6F 6E 69 74 6F
+	   72 00
+ 0000000C 20 20 20 20 20	VXDMHLPMessage	db	"                                 Loading...",0
+	   20 20 20 20 20
+	   20 20 20 20 20
+	   20 20 20 20 20
+	   20 20 20 20 20
+	   20 20 20 20 20
+	   20 20 20 4C 6F
+	   61 64 69 6E 67
+	   2E 2E 2E 00
+ 00000038
+				BeginProc VXDMHLP_Device_Init
+ 00000038		     1		?prolog_VXDMHLP_Device_Init label near
+ 00000038 00000038	     1	    VXDMHLP_Device_Init proc near
+
+				if 0
+				endif
+					; determine if we have cpuid instruction
+ 00000038  FA				cli				; disable interrupts
+ 00000039  9C				pushfd				; push flags
+ 0000003A  58				pop	eax			; pop flags
+ 0000003B  8B D0			mov	edx, eax		; save original flags
+ 0000003D  35 00200000			xor	eax, 200000h		; toggle bit 21
+ 00000042  50				push	eax			; push toggled flags
+ 00000043  9D				popfd				; load toggled flags
+ 00000044  9C				pushfd				; push toggled flags
+ 00000045  58				pop	eax			; pop toggled flags
+ 00000046  52				push	edx			; push orig flags
+ 00000047  9D				popfd				; restore orig flags
+ 00000048  FB				sti				; enable interrupts
+ 00000049  3B C2			cmp	eax, edx		; did bit 21 change
+ 0000004B  74 0E			je	nonpentium		; can't change means no cpuid instr
+					; we have cpuid
+ 0000004D  B8 00000001			mov	eax, 1			; request family id
+ 00000052  0F A2			db	0Fh, 0A2h		; CPUID
+ 00000054  3D 00000500			cmp	eax, 500h		; test for pentium family
+ 00000059  73 19			jae	pentium			; if so, we're OK
+					; otherwise blot out the rdtsc instructions
+
+
+					; have to zero all rdtsc instructions
+ 0000005B			nonpentium:
+ 0000005B  B8 C033D233			mov	eax, 0C033D233h		; xor eax, eax	; xor edx, edx
+ 00000060  A3 00000039 R		mov	dword ptr rdts1, eax
+ 00000065  A3 0000005C R		mov	dword ptr rdts2, eax
+ 0000006A  A3 0000039C R		mov	dword ptr rdts3, eax
+ 0000006F  A3 000003AF R		mov	dword ptr rdts4, eax
+
+ 00000074			pentium:
+					; Initialize
+ 00000074  E8 00000117 R		call	InitHookTable
+ 00000079  E8 00000178 R		call	InitReturnTable
+
+					; Ready to go
+ 0000007E  F8				clc
+ 0000007F  C3				ret
+				EndProc VXDMHLP_Device_Init
+ 00000080		     1	    VXDMHLP_Device_Init endp
+ 00000080
+				VXD_ICODE_ENDS
+ 00000080 0080		     1	_ITEXT	ENDS
+
+				end
+Microsoft (R) Macro Assembler Version 6.11d		    04/29/01 18:30:51
+VXDMHLP - VXDMHLP VxD					     Symbols 2 - 1
+
+
+
+
+Macros:
+
+                N a m e                 Type
+
+?ASYNC_SERVICE_BeginProc . . . .	Proc
+?CCALL_BeginProc . . . . . . . .	Proc
+?ESP_BeginProc . . . . . . . . .	Proc
+?FASTCALL_BeginProc  . . . . . .	Proc
+?HIGH_FREQ_BeginProc . . . . . .	Proc
+?HOOK_PROC_BeginProc . . . . . .	Proc
+?ICALL_BeginProc . . . . . . . .	Proc
+?LOCAL_BeginProc . . . . . . . .	Proc
+?NEVER_REENTER_BeginProc . . . .	Proc
+?NOT_SWAPPING_BeginProc  . . . .	Proc
+?NO_LOG_BeginProc  . . . . . . .	Proc
+?NO_PROFILE_BeginProc  . . . . .	Proc
+?NO_PROLOG_BeginProc . . . . . .	Proc
+?NO_TEST_CLD_BeginProc . . . . .	Proc
+?PCALL_BeginProc . . . . . . . .	Proc
+?PUBLIC_BeginProc  . . . . . . .	Proc
+?SCALL_BeginProc . . . . . . . .	Proc
+?SERVICE_BeginProc . . . . . . .	Proc
+?TEST_BLOCK_BeginProc  . . . . .	Proc
+?TEST_REENTER_BeginProc  . . . .	Proc
+?W32SVC_BeginProc  . . . . . . .	Proc
+?_BeginProc_Debug_Prologue . . .	Proc
+?_BeginProc  . . . . . . . . . .	Proc
+?argvar  . . . . . . . . . . . .	Proc
+?arg . . . . . . . . . . . . . .	Proc
+?merge . . . . . . . . . . . . .	Proc
+?setname . . . . . . . . . . . .	Proc
+?toupper . . . . . . . . . . . .	Proc
+ArgVar . . . . . . . . . . . . .	Proc
+BST2 . . . . . . . . . . . . . .	Proc
+BeginDoc . . . . . . . . . . . .	Proc
+BeginMsg . . . . . . . . . . . .	Proc
+BeginProc  . . . . . . . . . . .	Proc
+Begin_Service_Table  . . . . . .	Proc
+Begin_Win32_Services . . . . . .	Proc
+ClearCParams . . . . . . . . . .	Proc
+CodeLockFlags  . . . . . . . . .	Proc
+Declare_Win32_Service  . . . . .	Proc
+DefLockableCodeBegin . . . . . .	Proc
+DefLockableCodeEnd . . . . . . .	Proc
+DefineVxDName  . . . . . . . . .	Proc
+Dword_Align  . . . . . . . . . .	Proc
+EndDoc . . . . . . . . . . . . .	Proc
+EndMsg . . . . . . . . . . . . .	Proc
+EndProc  . . . . . . . . . . . .	Proc
+End_Service_Table  . . . . . . .	Proc
+End_Win32_Services . . . . . . .	Proc
+EnterProc  . . . . . . . . . . .	Proc
+Fatal_Error  . . . . . . . . . .	Proc
+GetVxDServiceAddress . . . . . .	Proc
+GetVxDServiceOrdinal . . . . . .	Proc
+IO_Delay . . . . . . . . . . . .	Proc
+IncProfileCount  . . . . . . . .	Proc
+LeaveProc  . . . . . . . . . . .	Proc
+LocalVar . . . . . . . . . . . .	Proc
+MakeCodeSeg  . . . . . . . . . .	Proc
+MarkCodeLocked . . . . . . . . .	Proc
+MarkCodeUnlocked . . . . . . . .	Proc
+PushCParams  . . . . . . . . . .	Proc
+Return . . . . . . . . . . . . .	Proc
+VMM_FastCall_Service . . . . . .	Proc
+VMM_Service  . . . . . . . . . .	Proc
+VMM_StdCall_Service  . . . . . .	Proc
+VxD_DOSVM_CODE_ENDS  . . . . . .	Proc
+VxD_DOSVM_CODE_SEG . . . . . . .	Proc
+VxD_INT21_CODE_ENDS  . . . . . .	Proc
+VxD_INT21_CODE_SEG . . . . . . .	Proc
+VxD_L0CKABLE_BEGIN_CODE_ENDS . .	Proc
+VxD_L0CKABLE_BEGIN_CODE_SEG  . .	Proc
+VxD_LOCKABLE_CODE_ENDS . . . . .	Proc
+VxD_LOCKABLE_CODE_SEG  . . . . .	Proc
+VxD_LOCKABLE_END_CODE_ENDS . . .	Proc
+VxD_LOCKABLE_END_CODE_SEG  . . .	Proc
+VxD_PNP_CODE_ENDS  . . . . . . .	Proc
+VxD_PNP_CODE_SEG . . . . . . . .	Proc
+VxD_RARE_CODE_ENDS . . . . . . .	Proc
+VxD_RARE_CODE_SEG  . . . . . . .	Proc
+VxD_SYSEXIT_CODE_ENDS  . . . . .	Proc
+VxD_SYSEXIT_CODE_SEG . . . . . .	Proc
+VxD_THCREATE_CODE_ENDS . . . . .	Proc
+VxD_THCREATE_CODE_SEG  . . . . .	Proc
+VxD_THDESTROY_CODE_ENDS  . . . .	Proc
+VxD_THDESTROY_CODE_SEG . . . . .	Proc
+VxD_VMCREATE_CODE_ENDS . . . . .	Proc
+VxD_VMCREATE_CODE_SEG  . . . . .	Proc
+VxD_VMDESTROY_CODE_ENDS  . . . .	Proc
+VxD_VMDESTROY_CODE_SEG . . . . .	Proc
+VxD_VMRESUME_CODE_ENDS . . . . .	Proc
+VxD_VMRESUME_CODE_SEG  . . . . .	Proc
+VxD_VMSUSPEND_CODE_ENDS  . . . .	Proc
+VxD_VMSUSPEND_CODE_SEG . . . . .	Proc
+VxD_W16_CODE_ENDS  . . . . . . .	Proc
+VxD_W16_CODE_SEG . . . . . . . .	Proc
+VxD_W32_CODE_ENDS  . . . . . . .	Proc
+VxD_W32_CODE_SEG . . . . . . . .	Proc
+Win32call  . . . . . . . . . . .	Proc
+
+
+Structures and Unions:
+
+                N a m e                  Size
+                                         Offset      Type
+
+DemandInfoStruc  . . . . . . . .	 0040
+  DILin_Total_Count  . . . . . .	 0000	     DWord
+  DIPhys_Count . . . . . . . . .	 0004	     DWord
+  DIFree_Count . . . . . . . . .	 0008	     DWord
+  DIUnlock_Count . . . . . . . .	 000C	     DWord
+  DILinear_Base_Addr . . . . . .	 0010	     DWord
+  DILin_Total_Free . . . . . . .	 0014	     DWord
+  DIPage_Faults  . . . . . . . .	 0018	     DWord
+  DIPage_Ins . . . . . . . . . .	 001C	     DWord
+  DIPage_Outs  . . . . . . . . .	 0020	     DWord
+  DIPage_Discards  . . . . . . .	 0024	     DWord
+  DIInstance_Faults  . . . . . .	 0028	     DWord
+  DIPagingFileMax  . . . . . . .	 002C	     DWord
+  DIPagingFileInUse  . . . . . .	 0030	     DWord
+  DICommit_Count . . . . . . . .	 0034	     DWord
+  DIReserved . . . . . . . . . .	 0038	     DWord
+Exception_Handler_Struc  . . . .	 0010
+  EH_Reserved  . . . . . . . . .	 0000	     DWord
+  EH_Start_EIP . . . . . . . . .	 0004	     DWord
+  EH_End_EIP . . . . . . . . . .	 0008	     DWord
+  EH_Handler . . . . . . . . . .	 000C	     DWord
+IPF_Data . . . . . . . . . . . .	 0014
+  IPF_LinAddr  . . . . . . . . .	 0000	     DWord
+  IPF_MapPageNum . . . . . . . .	 0004	     DWord
+  IPF_PTEEntry . . . . . . . . .	 0008	     DWord
+  IPF_FaultingVM . . . . . . . .	 000C	     DWord
+  IPF_Flags  . . . . . . . . . .	 0010	     DWord
+InstDataStruc  . . . . . . . . .	 0014
+  InstLinkF  . . . . . . . . . .	 0000	     DWord
+  InstLinkB  . . . . . . . . . .	 0004	     DWord
+  InstLinAddr  . . . . . . . . .	 0008	     DWord
+  InstSize . . . . . . . . . . .	 000C	     DWord
+  InstType . . . . . . . . . . .	 0010	     DWord
+Pushad_Struc . . . . . . . . . .	 0020
+  Pushad_EDI . . . . . . . . . .	 0000	     DWord
+  Pushad_ESI . . . . . . . . . .	 0004	     DWord
+  Pushad_EBP . . . . . . . . . .	 0008	     DWord
+  Pushad_ESP . . . . . . . . . .	 000C	     DWord
+  Pushad_EBX . . . . . . . . . .	 0010	     DWord
+  Pushad_EDX . . . . . . . . . .	 0014	     DWord
+  Pushad_ECX . . . . . . . . . .	 0018	     DWord
+  Pushad_EAX . . . . . . . . . .	 001C	     DWord
+ReclaimStruc . . . . . . . . . .	 0018
+  RS_Linear  . . . . . . . . . .	 0000	     DWord
+  RS_Bytes . . . . . . . . . . .	 0004	     DWord
+  RS_CallBack  . . . . . . . . .	 0008	     DWord
+  RS_RefData . . . . . . . . . .	 000C	     DWord
+  RS_HookTable . . . . . . . . .	 0010	     DWord
+  RS_Flags . . . . . . . . . . .	 0014	     DWord
+VMFaultInfo  . . . . . . . . . .	 0008
+  VMFI_EIP . . . . . . . . . . .	 0000	     DWord
+  VMFI_CS  . . . . . . . . . . .	 0004	     Word
+  VMFI_Ints  . . . . . . . . . .	 0006	     Word
+_MEMORY_BASIC_INFORMATION  . . .	 001C
+  mbi_BaseAddress  . . . . . . .	 0000	     DWord
+  mbi_AllocationBase . . . . . .	 0004	     DWord
+  mbi_AllocationProtect  . . . .	 0008	     DWord
+  mbi_RegionSize . . . . . . . .	 000C	     DWord
+  mbi_State  . . . . . . . . . .	 0010	     DWord
+  mbi_Protect  . . . . . . . . .	 0014	     DWord
+  mbi_Type . . . . . . . . . . .	 0018	     DWord
+_vmmguid . . . . . . . . . . . .	 0010
+  Data1  . . . . . . . . . . . .	 0000	     DWord
+  Data2  . . . . . . . . . . . .	 0004	     Word
+  Data3  . . . . . . . . . . . .	 0006	     Word
+  Data4  . . . . . . . . . . . .	 0008	     Byte
+cb_s . . . . . . . . . . . . . .	 0014
+  CB_VM_Status . . . . . . . . .	 0000	     DWord
+  CB_High_Linear . . . . . . . .	 0004	     DWord
+  CB_Client_Pointer  . . . . . .	 0008	     DWord
+  CB_VMID  . . . . . . . . . . .	 000C	     DWord
+  CB_Signature . . . . . . . . .	 0010	     DWord
+frmtx  . . . . . . . . . . . . .	 0014
+  frmtx_pfrmtxNext . . . . . . .	 0000	     DWord
+  frmtx_hmutex . . . . . . . . .	 0004	     DWord
+  frmtx_cEnterCount  . . . . . .	 0008	     DWord
+  frmtx_pthcbOwner . . . . . . .	 000C	     DWord
+  frmtx_htimeout . . . . . . . .	 0010	     DWord
+pd_s . . . . . . . . . . . . . .	 0020
+  pd_virginin  . . . . . . . . .	 0000	     DWord
+  pd_taintedin . . . . . . . . .	 0004	     DWord
+  pd_cleanout  . . . . . . . . .	 0008	     DWord
+  pd_dirtyout  . . . . . . . . .	 000C	     DWord
+  pd_virginfree  . . . . . . . .	 0010	     DWord
+  pd_taintedfree . . . . . . . .	 0014	     DWord
+  pd_dirty . . . . . . . . . . .	 0018	     DWord
+  pd_type  . . . . . . . . . . .	 001C	     DWord
+pmcb_s . . . . . . . . . . . . .	 0008
+  PMCB_Flags . . . . . . . . . .	 0000	     DWord
+  PMCB_Parent  . . . . . . . . .	 0004	     DWord
+tcb_s  . . . . . . . . . . . . .	 003C
+  TCB_Flags  . . . . . . . . . .	 0000	     DWord
+  TCB_Reserved1  . . . . . . . .	 0004	     DWord
+  TCB_Reserved2  . . . . . . . .	 0008	     DWord
+  TCB_Signature  . . . . . . . .	 000C	     DWord
+  TCB_ClientPtr  . . . . . . . .	 0010	     DWord
+  TCB_VMHandle . . . . . . . . .	 0014	     DWord
+  TCB_ThreadId . . . . . . . . .	 0018	     Word
+  TCB_PMLockOrigSS . . . . . . .	 001A	     Word
+  TCB_PMLockOrigESP  . . . . . .	 001C	     DWord
+  TCB_PMLockOrigEIP  . . . . . .	 0020	     DWord
+  TCB_PMLockStackCount . . . . .	 0024	     DWord
+  TCB_PMLockOrigCS . . . . . . .	 0028	     Word
+  TCB_PMPSPSelector  . . . . . .	 002A	     Word
+  TCB_ThreadType . . . . . . . .	 002C	     DWord
+  TCB_pad1 . . . . . . . . . . .	 0030	     Word
+  TCB_pad2 . . . . . . . . . . .	 0032	     Byte
+  TCB_extErrLocus  . . . . . . .	 0033	     Byte
+  TCB_extErr . . . . . . . . . .	 0034	     Word
+  TCB_extErrAction . . . . . . .	 0036	     Byte
+  TCB_extErrClass  . . . . . . .	 0037	     Byte
+  TCB_extErrPtr  . . . . . . . .	 0038	     DWord
+vmmfrinfo  . . . . . . . . . . .	 003C
+  vmmfrinfo_frmtxDOS . . . . . .	 0000	     Byte
+  vmmfrinfo_frmtxV86 . . . . . .	 0014	     Byte
+  vmmfrinfo_frmtxOther . . . . .	 0028	     Byte
+
+
+Segments and Groups:
+
+                N a m e                 Size     Length   Align   Combine Class
+
+CONST  . . . . . . . . . . . . .	32 Bit	 0000	  DWord	  Public  'LCODE'	 
+DOSVM  . . . . . . . . . . . . .	32 Bit	 0000	  DWord	  Public  'DOSVMCODE'  
+FLAT . . . . . . . . . . . . . .	GROUP
+INT21  . . . . . . . . . . . . .	32 Bit	 0000	  DWord	  Public  'INT21CODE'  
+L0CKABLE_BEGIN . . . . . . . . .	32 Bit	 0000	  DWord	  Public  'LOCKABLECODE'	
+LOCKABLE_END . . . . . . . . . .	32 Bit	 0000	  DWord	  Public  'LOCKABLECODE'	
+LOCKABLE . . . . . . . . . . . .	32 Bit	 0000	  DWord	  Public  'LOCKABLECODE'	
+PNP  . . . . . . . . . . . . . .	32 Bit	 0000	  DWord	  Public  'PNPCODE'  
+RARE . . . . . . . . . . . . . .	32 Bit	 0000	  DWord	  Public  'RARECODE'  
+SYSEXIT  . . . . . . . . . . . .	32 Bit	 0000	  DWord	  Public  'SYSEXITCODE'  
+THCREATE . . . . . . . . . . . .	32 Bit	 0000	  DWord	  Public  'THCREATECODE'	
+THDESTROY  . . . . . . . . . . .	32 Bit	 0000	  DWord	  Public  'THDESTROYCODE'	 
+VMCREATE . . . . . . . . . . . .	32 Bit	 0000	  DWord	  Public  'VMCREATECODE'	
+VMDESTROY  . . . . . . . . . . .	32 Bit	 0000	  DWord	  Public  'VMDESTROYCODE'	 
+VMRESUME . . . . . . . . . . . .	32 Bit	 0000	  DWord	  Public  'VMRESUMECODE'	
+VMSUSPEND  . . . . . . . . . . .	32 Bit	 0000	  DWord	  Public  'VMSUSPENDCODE'	 
+W16  . . . . . . . . . . . . . .	32 Bit	 0000	  DWord	  Public  'W16CODE'  
+W32  . . . . . . . . . . . . . .	32 Bit	 0000	  DWord	  Public  'W32CODE'  
+_16ICODE . . . . . . . . . . . .	16 Bit	 0000	  Word	  Public  '16ICODE'  
+_BSS . . . . . . . . . . . . . .	32 Bit	 0000	  DWord	  Public  'LCODE'	 
+_DATA  . . . . . . . . . . . . .	32 Bit	 0000	  DWord	  Public  'LCODE'	 
+_DB0START  . . . . . . . . . . .	32 Bit	 0000	  DWord	  Public  'DBOCODE'  
+_DB1CODE . . . . . . . . . . . .	32 Bit	 0000	  DWord	  Public  'DBOCODE'  
+_DB2DATA . . . . . . . . . . . .	32 Bit	 0000	  DWord	  Public  'DBOCODE'  
+_IDATA . . . . . . . . . . . . .	32 Bit	 001C	  DWord	  Public  'ICODE'	 
+_ITEXT . . . . . . . . . . . . .	32 Bit	 0080	  DWord	  Public  'ICODE'	 
+_LDATA . . . . . . . . . . . . .	32 Bit	 2910	  DWord	  Public  'LCODE'	 
+_LTEXT . . . . . . . . . . . . .	32 Bit	 04DB	  DWord	  Public  'LCODE'	 
+_PATHDATA  . . . . . . . . . . .	32 Bit	 0000	  DWord	  Public  'LCODE'	 
+_PATHEND . . . . . . . . . . . .	32 Bit	 0000	  DWord	  Public  'LCODE'	 
+_PATHSTART . . . . . . . . . . .	32 Bit	 0000	  DWord	  Public  'LCODE'	 
+_PDATA . . . . . . . . . . . . .	32 Bit	 0000	  DWord	  Public  'PDATA'	 
+_PTEXT . . . . . . . . . . . . .	32 Bit	 0000	  DWord	  Public  'PCODE'	 
+_RCODE . . . . . . . . . . . . .	16 Bit	 0000	  Word	  Public  'RCODE'	 
+_SDATA . . . . . . . . . . . . .	32 Bit	 0000	  DWord	  Public  'SCODE'	 
+_STEXT . . . . . . . . . . . . .	32 Bit	 0000	  DWord	  Public  'SCODE'	 
+_TEXT  . . . . . . . . . . . . .	32 Bit	 0000	  DWord	  Public  'LCODE'	 
+_TLS . . . . . . . . . . . . . .	32 Bit	 0000	  DWord	  Public  'LCODE'	 
+
+
+Procedures,  parameters and locals:
+
+                N a m e                 Type     Value    Attr
+
+$$$00001 . . . . . . . . . . . .	P Near	 016C	  _LDATA	Length= 000C Private
+$$$00003 . . . . . . . . . . . .	P Near	 0190	  _LDATA	Length= 272D Private
+$$$00004 . . . . . . . . . . . .	P Near	 0000	  _LTEXT	Length= 0000 Private
+$$$00005 . . . . . . . . . . . .	P Near	 001C	  _IDATA	Length= 0000 Private
+$$$00006 . . . . . . . . . . . .	P Near	 0000	  _LTEXT	Length= 0000 Private
+$$$00007 . . . . . . . . . . . .	P Near	 2910	  _LDATA	Length= 0000 Private
+$$$00008 . . . . . . . . . . . .	P Near	 0000	  _LTEXT	Length= 0000 Private
+$$$00010 . . . . . . . . . . . .	P Near	 0049	  _LTEXT	Length= 0000 Private
+$$$00012 . . . . . . . . . . . .	P Near	 0095	  _LTEXT	Length= 0000 Private
+$$$00014 . . . . . . . . . . . .	P Near	 00F3	  _LTEXT	Length= 0000 Private
+$$$00016 . . . . . . . . . . . .	P Near	 0117	  _LTEXT	Length= 0000 Private
+$$$00018 . . . . . . . . . . . .	P Near	 0178	  _LTEXT	Length= 0000 Private
+$$$00021 . . . . . . . . . . . .	P Near	 01D2	  _LTEXT	Length= 0000 Private
+$$$00023 . . . . . . . . . . . .	P Near	 0427	  _LTEXT	Length= 0000 Private
+$$$00025 . . . . . . . . . . . .	P Near	 04DB	  _LTEXT	Length= 0000 Private
+$$$00026 . . . . . . . . . . . .	P Near	 0038	  _ITEXT	Length= 0000 Private
+$$$00028 . . . . . . . . . . . .	P Near	 0080	  _ITEXT	Length= 0000 Private
+HookTemplateProc . . . . . . . .	P Near	 0178	  _LDATA	Length= 000B Public
+InitHookTable  . . . . . . . . .	P Near	 0117	  _LTEXT	Length= 0061 Public
+InitReturnTable  . . . . . . . .	P Near	 0178	  _LTEXT	Length= 0041 Public
+MRUEnter . . . . . . . . . . . .	P Near	 0095	  _LTEXT	Length= 005E Public
+MRUExit  . . . . . . . . . . . .	P Near	 00F3	  _LTEXT	Length= 0024 Public
+MonEnter . . . . . . . . . . . .	P Near	 0000	  _LTEXT	Length= 0049 Public
+MonExit  . . . . . . . . . . . .	P Near	 0049	  _LTEXT	Length= 004C Public
+VXDMHLP_Control  . . . . . . . .	P Near	 01B9	  _LTEXT	Length= 0019 Public
+VXDMHLP_Device_Exit  . . . . . .	P Near	 0427	  _LTEXT	Length= 00B4 Public
+VXDMHLP_Device_Init  . . . . . .	P Near	 0038	  _ITEXT	Length= 0048 Public
+VXDMHLP_ioctl  . . . . . . . . .	P Near	 01D2	  _LTEXT	Length= 0255 Public
+
+
+Symbols:
+
+                N a m e                 Type     Value    Attr
+
+??0017 . . . . . . . . . . . . .	Number	 0008h	 
+??0022 . . . . . . . . . . . . .	Number	 0000h	 
+??0024 . . . . . . . . . . . . .	Number	 0003h	 
+??0026 . . . . . . . . . . . . .	Number	 0000h	 
+??0028 . . . . . . . . . . . . .	Number	 0000h	 
+??002A . . . . . . . . . . . . .	Number	 0000h	 
+??002C . . . . . . . . . . . . .	Number	 0000h	 
+??0031 . . . . . . . . . . . . .	Number	 0003h	 
+??0033 . . . . . . . . . . . . .	Number	 0002h	 
+??_16ICODE . . . . . . . . . . .	Number	 0006h	 
+??_CUR_CODE_SEG  . . . . . . . .	Number	 0000h	 
+??_DBOCODE . . . . . . . . . . .	Number	 0005h	 
+??_ICODE . . . . . . . . . . . .	Number	 0002h	 
+??_LCODE . . . . . . . . . . . .	Number	 0001h	 
+??_LOCKABLECODE  . . . . . . . .	Number	 0008h	 
+??_PCODE . . . . . . . . . . . .	Number	 0003h	 
+??_RCODE . . . . . . . . . . . .	Number	 0007h	 
+??_SCODE . . . . . . . . . . . .	Number	 0004h	 
+??_align . . . . . . . . . . . .	Number	 0000h	 
+??_ends  . . . . . . . . . . . .	Text   	 
+??_fastcall_ObsoleteKfLowerIrql 	Number	 0001h	 
+??_fastcall_ObsoleteKfRaiseIrql 	Number	 0001h	 
+??_fastcall_Set_Preemptable_Count 	Number	 0001h	 
+??_pf_ArgsUsed . . . . . . . . .	Number	 0002h	 
+??_pf_Check  . . . . . . . . . .	Number	 0001h	 
+??_pf_Entered  . . . . . . . . .	Number	 0004h	 
+??_pf_Left . . . . . . . . . . .	Number	 0008h	 
+??_pf_Returned . . . . . . . . .	Number	 0010h	 
+??_pushed  . . . . . . . . . . .	Number	 0000h	 
+??_standardccall_HeapAllocateEx 	Number	 0004h	 
+??_standardccall_HeapFreeEx  . .	Number	 0002h	 
+??_standardccall_HeapGetSizeEx .	Number	 0002h	 
+??_standardccall_HeapReAllocateEx 	Number	 0005h	 
+??_standardccall_KeCheckDivideByZeroTrap . Number   0001h   
+??_standardccall_KfRaiseIrqlToDpcLevel . Number	  0000h	  
+??_standardccall_ObsoleteKeGetCurrentIrql  Number   0000h   
+??_standardccall_ObsoleteKeInitializeDpc . Number   0003h   
+??_standardccall_ObsoleteKeInsertQueueDpc  Number   0003h   
+??_standardccall_ObsoleteKeRemoveQueueDpc  Number   0001h   
+??_standardccall_ObsoleteRtlRaiseException . Number   0001h   
+??_standardccall_ObsoleteRtlRaiseStatus  Number	  0001h	  
+??_standardccall_ObsoleteRtlUnwind .	Number	 0004h	 
+?_16ICODE  . . . . . . . . . . .	Text   	 (??_CUR_CODE_SEG MOD 16) - ??_16ICODE
+?_DBOCODE  . . . . . . . . . . .	Text   	 (??_CUR_CODE_SEG MOD 16) - ??_DBOCODE
+?_ICODE  . . . . . . . . . . . .	Text   	 (??_CUR_CODE_SEG MOD 16) - ??_ICODE
+?_LCODE  . . . . . . . . . . . .	Text   	 (??_CUR_CODE_SEG MOD 16) - ??_LCODE
+?_LOCKABLECODE . . . . . . . . .	Text   	 (??_CUR_CODE_SEG MOD 16) - ??_LOCKABLECODE
+?_PCODE  . . . . . . . . . . . .	Text   	 (??_CUR_CODE_SEG MOD 16) - ??_PCODE
+?_RCODE  . . . . . . . . . . . .	Text   	 (??_CUR_CODE_SEG MOD 16) - ??_RCODE
+?_SCODE  . . . . . . . . . . . .	Text   	 (??_CUR_CODE_SEG MOD 16) - ??_SCODE
+?prolog_InitReturnTable  . . . .	L Near	 0178	  _LTEXT	
+?prolog_VXDMHLP_Device_Exit  . .	L Near	 0427	  _LTEXT	
+?prolog_VXDMHLP_Device_Init  . .	L Near	 0038	  _ITEXT	
+?prolog_VXDMHLP_ioctl  . . . . .	L Near	 01D2	  _LTEXT	
+@@Adjust_Exec_Priority . . . . .	Number	 0001001Eh   
+@@Adjust_Execution_Time  . . . .	Number	 00010037h   
+@@Adjust_Thread_Exec_Priority  .	Number	 00010114h   
+@@Allocate_PM_App_CB_Area  . . .	Number	 00010087h   
+@@Allocate_PM_Call_Back  . . . .	Number	 0001000Ch   
+@@Allocate_V86_Call_Back . . . .	Number	 0001000Bh   
+@@Assert_FS_Service  . . . . . .	Number	 0001019Ah   
+@@Attach_Thread_To_Group . . . .	Number	 0001016Bh   
+@@Begin_Critical_Section . . . .	Number	 0001001Fh   
+@@Begin_Nest_Exec  . . . . . . .	Number	 00010083h   
+@@Begin_Nest_V86_Exec  . . . . .	Number	 00010082h   
+@@Begin_Non_Serial_Nest_V86_Exec .	Number	 00010186h   
+@@Begin_Reentrant_Execution  . .	Number	 00010007h   
+@@Begin_Use_Locked_PM_Stack  . .	Number	 0001008Bh   
+@@Begin_V86_Serialization  . . .	Number	 0001013Ch   
+@@Boost_Thread_With_VM . . . . .	Number	 00010178h   
+@@Boost_With_Decay . . . . . . .	Number	 00010162h   
+@@Build_Int_Stack_Frame  . . . .	Number	 0001004Ch   
+@@Call_Global_Event  . . . . . .	Number	 00010010h   
+@@Call_Priority_Thread_Event . .	Number	 00010143h   
+@@Call_Priority_VM_Event . . . .	Number	 00010014h   
+@@Call_Restricted_Event  . . . .	Number	 0001015Ah   
+@@Call_VM_Event  . . . . . . . .	Number	 00010011h   
+@@Call_When_Idle . . . . . . . .	Number	 0001003Ah   
+@@Call_When_Not_Critical . . . .	Number	 00010024h   
+@@Call_When_Task_Switched  . . .	Number	 0001002Ah   
+@@Call_When_Thread_Switched  . .	Number	 00010104h   
+@@Call_When_VM_Ints_Enabled  . .	Number	 00010019h   
+@@Call_When_VM_Returns . . . . .	Number	 0001000Dh   
+@@Cancel_Call_When_Idle  . . . .	Number	 0001012Bh   
+@@Cancel_Call_When_Not_Critical 	Number	 0001012Ah   
+@@Cancel_Call_When_Task_Switched .	Number	 0001012Ch   
+@@Cancel_Call_When_Thread_Switched .	Number	 00010112h   
+@@Cancel_Global_Event  . . . . .	Number	 00010012h   
+@@Cancel_Priority_VM_Event . . .	Number	 00010015h   
+@@Cancel_Restricted_Event  . . .	Number	 0001015Bh   
+@@Cancel_Thread_Event  . . . . .	Number	 000100FCh   
+@@Cancel_Time_Out  . . . . . . .	Number	 0001003Eh   
+@@Cancel_VM_Event  . . . . . . .	Number	 00010013h   
+@@Claim_Critical_Section . . . .	Number	 00010022h   
+@@Cleanup_Thread_State . . . . .	Number	 00010170h   
+@@Clear_Mono_Screen  . . . . . .	Number	 000100E2h   
+@@Close_Boot_Log . . . . . . . .	Number	 0001018Ah   
+@@Close_VM . . . . . . . . . . .	Number	 000100ECh   
+@@Convert_Boolean_String . . . .	Number	 000100B2h   
+@@Convert_Decimal_String . . . .	Number	 000100ACh   
+@@Convert_Fixed_Point_String . .	Number	 000100AEh   
+@@Convert_Hex_String . . . . . .	Number	 000100B0h   
+@@Crash_Cur_VM . . . . . . . . .	Number	 0001002Fh   
+@@Create_Semaphore . . . . . . .	Number	 00010025h   
+@@Debug_Convert_Hex_Binary . . .	Number	 000100C5h   
+@@Debug_Convert_Hex_Decimal  . .	Number	 000100C6h   
+@@Debug_Test_Cur_Thread  . . . .	Number	 00010110h   
+@@Debug_Test_Cur_VM  . . . . . .	Number	 000100CCh   
+@@Debug_Test_Valid_Handle  . . .	Number	 000100C7h   
+@@Debug_Test_Valid_Thread_Handle .	Number	 0001010Fh   
+@@Destroy_Semaphore  . . . . . .	Number	 00010026h   
+@@Detach_Thread_From_Group . . .	Number	 0001016Ch   
+@@Directed_Sys_Control . . . . .	Number	 00010147h   
+@@Disable_Global_Trapping  . . .	Number	 00010099h   
+@@Disable_Local_Trapping . . . .	Number	 0001009Ah   
+@@Disable_Touch_1st_Meg  . . . .	Number	 000100EEh   
+@@Disable_VM_Ints  . . . . . . .	Number	 0001001Bh   
+@@EnableDisable_Boot_Log . . . .	Number	 0001018Bh   
+@@Enable_Global_Trapping . . . .	Number	 00010097h   
+@@Enable_Local_Trapping  . . . .	Number	 00010098h   
+@@Enable_Touch_1st_Meg . . . . .	Number	 000100EDh   
+@@Enable_VM_Ints . . . . . . . .	Number	 0001001Ah   
+@@End_Crit_And_Suspend . . . . .	Number	 00010021h   
+@@End_Critical_Section . . . . .	Number	 00010020h   
+@@End_Nest_Exec  . . . . . . . .	Number	 00010086h   
+@@End_Reentrant_Execution  . . .	Number	 00010008h   
+@@End_Use_Locked_PM_Stack  . . .	Number	 0001008Ch   
+@@End_V86_Serialization  . . . .	Number	 00010172h   
+@@Exec_Int . . . . . . . . . . .	Number	 00010084h   
+@@Exec_PM_Int  . . . . . . . . .	Number	 00010154h   
+@@Exec_VxD_Int . . . . . . . . .	Number	 0001008Fh   
+@@Fatal_Error_Handler  . . . . .	Number	 000100BEh   
+@@Fatal_Memory_Error . . . . . .	Number	 000100BFh   
+@@Force_Mutexes_Free . . . . . .	Number	 0001017Fh   
+@@GetDOSVectors  . . . . . . . .	Number	 000100BAh   
+@@GetSetDetailedVMError  . . . .	Number	 000100E0h   
+@@GetSet_HMA_Info  . . . . . . .	Number	 000100BCh   
+@@Get_Boot_Flags . . . . . . . .	Number	 00010179h   
+@@Get_Config_Directory . . . . .	Number	 000100B7h   
+@@Get_Crit_Section_Status  . . .	Number	 00010029h   
+@@Get_Crit_Status_No_Block . . .	Number	 000100F1h   
+@@Get_Crit_Status_Thread . . . .	Number	 00010145h   
+@@Get_Cur_PM_App_CB  . . . . . .	Number	 00010088h   
+@@Get_Cur_Thread_Handle  . . . .	Number	 00010108h   
+@@Get_Cur_VM_Handle  . . . . . .	Number	 00010001h   
+@@Get_DDB  . . . . . . . . . . .	Number	 00010146h   
+@@Get_Debug_Options  . . . . . .	Number	 000100DCh   
+@@Get_Environment_String . . . .	Number	 000100B5h   
+@@Get_Exec_Path  . . . . . . . .	Number	 000100B6h   
+@@Get_Execution_Focus  . . . . .	Number	 00010030h   
+@@Get_Fault_Hook_Addrs . . . . .	Number	 0001007Eh   
+@@Get_Initial_Thread_Handle  . .	Number	 0001010Dh   
+@@Get_Inst_V86_Int_Vec_Base  . .	Number	 0001018Dh   
+@@Get_Instanced_V86_Int_Vector .	Number	 00010141h   
+@@Get_Last_Updated_System_Time .	Number	 000100CFh   
+@@Get_Last_Updated_VM_Exec_Time 	Number	 000100D0h   
+@@Get_Machine_Info . . . . . . .	Number	 000100BBh   
+@@Get_Mono_Chr . . . . . . . . .	Number	 000100E7h   
+@@Get_Mono_Cur_Pos . . . . . . .	Number	 000100E6h   
+@@Get_NMI_Handler_Addr . . . . .	Number	 00010016h   
+@@Get_Name_Of_Ugly_TSR . . . . .	Number	 000100DBh   
+@@Get_Nest_Exec_Status . . . . .	Number	 00010187h   
+@@Get_Next_Arena . . . . . . . .	Number	 000100DAh   
+@@Get_Next_Profile_String  . . .	Number	 000100B4h   
+@@Get_Next_Thread_Handle . . . .	Number	 00010113h   
+@@Get_Next_VM_Handle . . . . . .	Number	 0001003Bh   
+@@Get_PM_Int_Type  . . . . . . .	Number	 000100CDh   
+@@Get_PM_Int_Vector  . . . . . .	Number	 00010044h   
+@@Get_PSP_Segment  . . . . . . .	Number	 000100B9h   
+@@Get_Profile_Boolean  . . . . .	Number	 000100B1h   
+@@Get_Profile_Decimal_Int  . . .	Number	 000100ABh   
+@@Get_Profile_Fixed_Point  . . .	Number	 000100ADh   
+@@Get_Profile_Hex_Int  . . . . .	Number	 000100AFh   
+@@Get_Profile_String . . . . . .	Number	 000100B3h   
+@@Get_Set_Real_DOS_PSP . . . . .	Number	 00010142h   
+@@Get_Sys_Thread_Handle  . . . .	Number	 0001010Ah   
+@@Get_Sys_VM_Handle  . . . . . .	Number	 00010003h   
+@@Get_System_Time_Address  . . .	Number	 00010144h   
+@@Get_System_Time  . . . . . . .	Number	 0001003Fh   
+@@Get_Thread_Win32_Pri . . . . .	Number	 00010166h   
+@@Get_Time_Slice_Granularity . .	Number	 00010034h   
+@@Get_Time_Slice_Info  . . . . .	Number	 00010036h   
+@@Get_Time_Slice_Priority  . . .	Number	 00010032h   
+@@Get_V86_Int_Vector . . . . . .	Number	 00010042h   
+@@Get_VMM_Reenter_Count  . . . .	Number	 00010006h   
+@@Get_VMM_Version  . . . . . . .	Number	 00010000h   
+@@Get_VM_Exec_Time . . . . . . .	Number	 00010040h   
+@@HeapAllocateEx . . . . . . . .	Number	 000101A7h   
+@@HeapFreeEx . . . . . . . . . .	Number	 000101AAh   
+@@HeapGetSizeEx  . . . . . . . .	Number	 000101A9h   
+@@HeapReAllocateEx . . . . . . .	Number	 000101A8h   
+@@Hook_Device_PM_API . . . . . .	Number	 00010092h   
+@@Hook_Device_Service  . . . . .	Number	 00010090h   
+@@Hook_Device_V86_API  . . . . .	Number	 00010091h   
+@@Hook_Invalid_Page_Fault  . . .	Number	 000100E9h   
+@@Hook_NMI_Event . . . . . . . .	Number	 00010018h   
+@@Hook_PM_Fault  . . . . . . . .	Number	 00010080h   
+@@Hook_V86_Fault . . . . . . . .	Number	 0001007Fh   
+@@Hook_V86_Int_Chain . . . . . .	Number	 00010041h   
+@@Hook_V86_Page  . . . . . . . .	Number	 00010071h   
+@@Hook_VMM_Fault . . . . . . . .	Number	 00010081h   
+@@In_Debug_Chr . . . . . . . . .	Number	 000100C4h   
+@@Install_Exception_Handler  . .	Number	 000100EFh   
+@@Install_IO_Handler . . . . . .	Number	 00010096h   
+@@Install_Mult_IO_Handlers . . .	Number	 00010095h   
+@@Install_V86_Break_Point  . . .	Number	 00010009h   
+@@Is_Debug_Chr . . . . . . . . .	Number	 000100E1h   
+@@KeCheckDivideByZeroTrap  . . .	Number	 000101ACh   
+@@KfRaiseIrqlToDpcLevel  . . . .	Number	 000101B3h   
+@@List_Allocate  . . . . . . . .	Number	 0001009Dh   
+@@List_Attach_Tail . . . . . . .	Number	 0001009Fh   
+@@List_Attach  . . . . . . . . .	Number	 0001009Eh   
+@@List_Create  . . . . . . . . .	Number	 0001009Bh   
+@@List_Deallocate  . . . . . . .	Number	 000100A2h   
+@@List_Destroy . . . . . . . . .	Number	 0001009Ch   
+@@List_Get_First . . . . . . . .	Number	 000100A3h   
+@@List_Get_Next  . . . . . . . .	Number	 000100A4h   
+@@List_Insert  . . . . . . . . .	Number	 000100A0h   
+@@List_Remove_First  . . . . . .	Number	 000100A5h   
+@@List_Remove  . . . . . . . . .	Number	 000100A1h   
+@@Load_FS_Service  . . . . . . .	Number	 00010199h   
+@@Locate_Byte_In_ROM . . . . . .	Number	 000100E8h   
+@@Log_Fault_Call_Out . . . . . .	Number	 00010190h   
+@@Log_Proc_Call  . . . . . . . .	Number	 000100CBh   
+@@MMGR_SetNULPageAddr  . . . . .	Number	 00010075h   
+@@Map_Flat . . . . . . . . . . .	Number	 0001001Ch   
+@@Map_Lin_To_VM_Addr . . . . . .	Number	 0001001Dh   
+@@MemArb_Reserve_Pages . . . . .	Number	 0001015Fh   
+@@No_Fail_Resume_VM  . . . . . .	Number	 0001002Dh   
+@@Nuke_VM  . . . . . . . . . . .	Number	 0001002Eh   
+@@ObsoleteKeGetCurrentIrql . . .	Number	 0001019Eh   
+@@ObsoleteKeInitializeDpc  . . .	Number	 000101A4h   
+@@ObsoleteKeInsertQueueDpc . . .	Number	 000101A5h   
+@@ObsoleteKeRemoveQueueDpc . . .	Number	 000101A6h   
+@@ObsoleteKfLowerIrql  . . . . .	Number	 000101A0h   
+@@ObsoleteKfRaiseIrql  . . . . .	Number	 0001019Fh   
+@@ObsoleteRtlRaiseException  . .	Number	 0001019Ch   
+@@ObsoleteRtlRaiseStatus . . . .	Number	 0001019Dh   
+@@ObsoleteRtlUnwind  . . . . . .	Number	 0001019Bh   
+@@OpenFile . . . . . . . . . . .	Number	 000100B8h   
+@@Open_Boot_Log  . . . . . . . .	Number	 00010188h   
+@@Out_Debug_Chr  . . . . . . . .	Number	 000100C3h   
+@@Out_Debug_String . . . . . . .	Number	 000100C2h   
+@@Out_Mono_Chr . . . . . . . . .	Number	 000100E3h   
+@@Out_Mono_String  . . . . . . .	Number	 000100E4h   
+@@Query_Thread_Priority  . . . .	Number	 000101BDh   
+@@Queue_Debug_String . . . . . .	Number	 000100CAh   
+@@Register_PEF_Provider  . . . .	Number	 0001015Ch   
+@@Release_Critical_Section . . .	Number	 00010023h   
+@@Release_Inversion_Pri_ID . . .	Number	 0001016Ah   
+@@Release_Inversion_Pri  . . . .	Number	 00010165h   
+@@Release_Time_Slice . . . . . .	Number	 00010038h   
+@@Remove_Exception_Handler . . .	Number	 000100F0h   
+@@Remove_IO_Handler  . . . . . .	Number	 00010116h   
+@@Remove_Mult_IO_Handlers  . . .	Number	 00010117h   
+@@Remove_V86_Break_Point . . . .	Number	 0001000Ah   
+@@Reset_Inversion_Pri  . . . . .	Number	 00010164h   
+@@Restore_Client_State . . . . .	Number	 0001008Eh   
+@@Restore_Forced_Mutexes . . . .	Number	 00010180h   
+@@Resume_Exec  . . . . . . . . .	Number	 00010085h   
+@@Resume_VM  . . . . . . . . . .	Number	 0001002Ch   
+@@Run_Preemptable_Events . . . .	Number	 000101B9h   
+@@Save_Client_State  . . . . . .	Number	 0001008Dh   
+@@Schedule_Global_Event  . . . .	Number	 0001000Eh   
+@@Schedule_Thread_Event  . . . .	Number	 000100FBh   
+@@Schedule_VM_Event  . . . . . .	Number	 0001000Fh   
+@@Set_Async_Time_Out . . . . . .	Number	 000100FEh   
+@@Set_Boot_Flags . . . . . . . .	Number	 0001017Ah   
+@@Set_Delete_On_Exit_File  . . .	Number	 000100EBh   
+@@Set_Execution_Focus  . . . . .	Number	 00010031h   
+@@Set_Global_Time_Out  . . . . .	Number	 0001003Ch   
+@@Set_Group_Static_Boost . . . .	Number	 0001016Dh   
+@@Set_Inversion_Pri  . . . . . .	Number	 00010163h   
+@@Set_Mono_Cur_Pos . . . . . . .	Number	 000100E5h   
+@@Set_NMI_Handler_Addr . . . . .	Number	 00010017h   
+@@Set_PM_Exec_Mode . . . . . . .	Number	 0001008Ah   
+@@Set_PM_Int_Type  . . . . . . .	Number	 000100CEh   
+@@Set_PM_Int_Vector  . . . . . .	Number	 00010045h   
+@@Set_Physical_HMA_Alias . . . .	Number	 000100DDh   
+@@Set_Preemptable_Count  . . . .	Number	 000101A3h   
+@@Set_System_Exit_Code . . . . .	Number	 000100BDh   
+@@Set_Thread_Static_Boost  . . .	Number	 00010168h   
+@@Set_Thread_Time_Out  . . . . .	Number	 000100FDh   
+@@Set_Thread_Win32_Pri_NoYield .	Number	 000101B6h   
+@@Set_Thread_Win32_Pri . . . . .	Number	 00010167h   
+@@Set_Time_Slice_Granularity . .	Number	 00010035h   
+@@Set_Time_Slice_Priority  . . .	Number	 00010033h   
+@@Set_V86_Exec_Mode  . . . . . .	Number	 00010089h   
+@@Set_V86_Int_Vector . . . . . .	Number	 00010043h   
+@@Set_VM_Static_Boost  . . . . .	Number	 00010169h   
+@@Set_VM_Time_Out  . . . . . . .	Number	 0001003Dh   
+@@Signal_Semaphore_No_Switch . .	Number	 00010131h   
+@@Signal_Semaphore . . . . . . .	Number	 00010028h   
+@@Simulate_Far_Call  . . . . . .	Number	 00010048h   
+@@Simulate_Far_Jmp . . . . . . .	Number	 00010049h   
+@@Simulate_Far_Ret_N . . . . . .	Number	 0001004Bh   
+@@Simulate_Far_Ret . . . . . . .	Number	 0001004Ah   
+@@Simulate_IO  . . . . . . . . .	Number	 00010094h   
+@@Simulate_Int . . . . . . . . .	Number	 00010046h   
+@@Simulate_Iret  . . . . . . . .	Number	 00010047h   
+@@Simulate_Pop . . . . . . . . .	Number	 0001004Eh   
+@@Simulate_Push  . . . . . . . .	Number	 0001004Dh   
+@@Simulate_VM_IO . . . . . . . .	Number	 00010130h   
+@@Suspend_VM . . . . . . . . . .	Number	 0001002Bh   
+@@System_Control . . . . . . . .	Number	 00010093h   
+@@Test_Cur_Thread_Handle . . . .	Number	 00010109h   
+@@Test_Cur_VM_Handle . . . . . .	Number	 00010002h   
+@@Test_DBCS_Lead_Byte  . . . . .	Number	 000100D1h   
+@@Test_Debug_Installed . . . . .	Number	 000100C1h   
+@@Test_Initial_Thread_Handle . .	Number	 0001010Eh   
+@@Test_Reenter . . . . . . . . .	Number	 000100C9h   
+@@Test_Sys_Thread_Handle . . . .	Number	 0001010Bh   
+@@Test_Sys_VM_Handle . . . . . .	Number	 00010004h   
+@@Test_VM_Ints_Enabled . . . . .	Number	 000100F9h   
+@@Time_Slice_Sleep . . . . . . .	Number	 00010161h   
+@@Time_Slice_Sys_VM_Idle . . . .	Number	 00010160h   
+@@Time_Slice_Wake_Sys_VM . . . .	Number	 00010184h   
+@@Unhook_Device_Service  . . . .	Number	 0001011Ch   
+@@Unhook_Invalid_Page_Fault  . .	Number	 000100EAh   
+@@Unhook_NMI_Event . . . . . . .	Number	 00010140h   
+@@Unhook_PM_Fault  . . . . . . .	Number	 0001011Ah   
+@@Unhook_V86_Fault . . . . . . .	Number	 00010119h   
+@@Unhook_V86_Int_Chain . . . . .	Number	 00010118h   
+@@Unhook_V86_Page  . . . . . . .	Number	 0001013Dh   
+@@Unhook_VMM_Fault . . . . . . .	Number	 0001011Bh   
+@@Update_System_Clock  . . . . .	Number	 000100C0h   
+@@VMMAddImportModuleName . . . .	Number	 000100F6h   
+@@VMMCreateThreadEx  . . . . . .	Number	 000101B4h   
+@@VMMCreateThread  . . . . . . .	Number	 00010105h   
+@@VMMTerminateThread . . . . . .	Number	 00010107h   
+@@VMM_Add_DDB  . . . . . . . . .	Number	 000100F7h   
+@@VMM_GetDDBList . . . . . . . .	Number	 0001013Fh   
+@@VMM_GetSystemInitState . . . .	Number	 00010111h   
+@@VMM_GetVxDLocationList . . . .	Number	 0001013Eh   
+@@VMM_Remove_DDB . . . . . . . .	Number	 000100F8h   
+@@VMM_Replace_Global_Environment .	Number	 00010185h   
+@@Validate_Client_Ptr  . . . . .	Number	 000100C8h   
+@@Validate_Thread_Handle . . . .	Number	 0001010Ch   
+@@Validate_VM_Handle . . . . . .	Number	 00010005h   
+@@Wait_Semaphore . . . . . . . .	Number	 00010027h   
+@@Wake_Up_VM . . . . . . . . . .	Number	 00010039h   
+@@Write_Boot_Log . . . . . . . .	Number	 00010189h   
+@@_AddFreePhysPage . . . . . . .	Number	 000100D2h   
+@@_AddInstanceItem . . . . . . .	Number	 000100A6h   
+@@_AddReclaimableItem  . . . . .	Number	 00010181h   
+@@_Add_Global_V86_Data_Area  . .	Number	 000100DFh   
+@@_AllocateThreadDataSlot  . . .	Number	 000100FFh   
+@@_Allocate_Device_CB_Area . . .	Number	 000100A7h   
+@@_Allocate_GDT_Selector . . . .	Number	 00010076h   
+@@_Allocate_Global_V86_Data_Area .	Number	 000100A8h   
+@@_Allocate_LDT_Selector . . . .	Number	 00010078h   
+@@_Allocate_Temp_V86_Data_Area .	Number	 000100A9h   
+@@_Assert_Range  . . . . . . . .	Number	 00010173h   
+@@_Assign_Device_V86_Pages . . .	Number	 00010072h   
+@@_AtEventTime . . . . . . . . .	Number	 00010191h   
+@@_AttemptingSomethingDangerous 	Number	 00010196h   
+@@_Begin_Preemptable_Code  . . .	Number	 000101A1h   
+@@_BlockOnID . . . . . . . . . .	Number	 000100FAh   
+@@_BuildDescriptorDWORDs . . . .	Number	 0001007Ah   
+@@_CallRing3 . . . . . . . . . .	Number	 00010153h   
+@@_Call_On_My_Not_Flat_Stack . .	Number	 00010193h   
+@@_Call_On_My_Stack  . . . . . .	Number	 0001018Ch   
+@@_ContextCreate . . . . . . . .	Number	 00010123h   
+@@_ContextDestroy  . . . . . . .	Number	 00010124h   
+@@_ContextSwitch . . . . . . . .	Number	 00010132h   
+@@_CopyPageTable . . . . . . . .	Number	 00010061h   
+@@_CreateMutex . . . . . . . . .	Number	 00010101h   
+@@_DeAssign_Device_V86_Pages . .	Number	 00010073h   
+@@_Deallocate_Device_CB_Area . .	Number	 00010115h   
+@@_Debug_Flags_Service . . . . .	Number	 000100F5h   
+@@_Debug_Out_Service . . . . . .	Number	 000100F4h   
+@@_Debug_Printf_Service  . . . .	Number	 0001012Dh   
+@@_DestroyMutex  . . . . . . . .	Number	 00010102h   
+@@_End_Preemptable_Code  . . . .	Number	 000101A2h   
+@@_EnterMustComplete . . . . . .	Number	 00010135h   
+@@_EnterMutex  . . . . . . . . .	Number	 0001012Eh   
+@@_EnumReclaimableItem . . . . .	Number	 00010183h   
+@@_ExecIntMustComplete . . . . .	Number	 0001013Ah   
+@@_ExecVxDIntMustComplete  . . .	Number	 0001013Bh   
+@@_FlushCaches . . . . . . . . .	Number	 000101B5h   
+@@_FlushMappedCacheBlock . . . .	Number	 000101B7h   
+@@_FreeThreadDataSlot  . . . . .	Number	 00010100h   
+@@_Free_GDT_Selector . . . . . .	Number	 00010077h   
+@@_Free_LDT_Selector . . . . . .	Number	 00010079h   
+@@_Free_Temp_V86_Data_Area . . .	Number	 000100AAh   
+@@_GARTCommit  . . . . . . . . .	Number	 000101AFh   
+@@_GARTFree  . . . . . . . . . .	Number	 000101B1h   
+@@_GARTMemAttributes . . . . . .	Number	 000101B2h   
+@@_GARTReserve . . . . . . . . .	Number	 000101AEh   
+@@_GARTUnCommit  . . . . . . . .	Number	 000101B0h   
+@@_GetAppFlatDSAlias . . . . . .	Number	 0001006Dh   
+@@_GetCurrentContext . . . . . .	Number	 00010157h   
+@@_GetDemandPageInfo . . . . . .	Number	 0001006Fh   
+@@_GetDescriptor . . . . . . . .	Number	 0001007Bh   
+@@_GetFirstV86Page . . . . . . .	Number	 0001006Bh   
+@@_GetFreePageCount  . . . . . .	Number	 0001005Ah   
+@@_GetGlblRng0V86IntBase . . . .	Number	 000100DEh   
+@@_GetInstanceInfo . . . . . . .	Number	 00010139h   
+@@_GetLastUpdatedThreadExecTime 	Number	 000100F2h   
+@@_GetLastV86Page  . . . . . . .	Number	 000100D5h   
+@@_GetMutexOwner . . . . . . . .	Number	 00010103h   
+@@_GetNulPageHandle  . . . . . .	Number	 0001006Ah   
+@@_GetPhysPageInfo . . . . . . .	Number	 0001015Dh   
+@@_GetRegistryKey  . . . . . . .	Number	 0001016Fh   
+@@_GetRegistryPath . . . . . . .	Number	 0001016Eh   
+@@_GetSetPageOutCount  . . . . .	Number	 00010070h   
+@@_GetSysPageCount . . . . . . .	Number	 0001005Bh   
+@@_GetThreadExecTime . . . . . .	Number	 00010106h   
+@@_GetThreadTerminationStatus  .	Number	 00010138h   
+@@_GetV86PageableArray . . . . .	Number	 00010066h   
+@@_GetVMPgCount  . . . . . . . .	Number	 0001005Ch   
+@@_GetVxDName  . . . . . . . . .	Number	 0001017Eh   
+@@_Get_CPUID_Flags . . . . . . .	Number	 000101ABh   
+@@_Get_Device_V86_Pages_Array  .	Number	 00010074h   
+@@_HeapAllocate  . . . . . . . .	Number	 0001004Fh   
+@@_HeapFree  . . . . . . . . . .	Number	 00010051h   
+@@_HeapGetSize . . . . . . . . .	Number	 00010052h   
+@@_HeapReAllocate  . . . . . . .	Number	 00010050h   
+@@_LeaveMustComplete . . . . . .	Number	 00010136h   
+@@_LeaveMutex  . . . . . . . . .	Number	 0001012Fh   
+@@_LinMapIntoV86 . . . . . . . .	Number	 00010062h   
+@@_LinPageLock . . . . . . . . .	Number	 00010063h   
+@@_LinPageUnLock . . . . . . . .	Number	 00010064h   
+@@_LinRegionLock . . . . . . . .	Number	 00010194h   
+@@_LinRegionUnLock . . . . . . .	Number	 00010195h   
+@@_LocalizeSprintf . . . . . . .	Number	 00010158h   
+@@_LocalizeStackSprintf  . . . .	Number	 00010159h   
+@@_MMGR_Toggle_HMA . . . . . . .	Number	 0001007Dh   
+@@_MMPageFileShutDown  . . . . .	Number	 000101BBh   
+@@_MMPreSystemExit . . . . . . .	Number	 000101BAh   
+@@_MapFreePhysReg  . . . . . . .	Number	 000100D6h   
+@@_MapIntoV86  . . . . . . . . .	Number	 0001005Dh   
+@@_MapPhysToLinear . . . . . . .	Number	 0001006Ch   
+@@_ModifyPageBits  . . . . . . .	Number	 00010060h   
+@@_PageAllocate  . . . . . . . .	Number	 00010053h   
+@@_PageAttach  . . . . . . . . .	Number	 00010125h   
+@@_PageChangePager . . . . . . .	Number	 00010175h   
+@@_PageCheckLinRange . . . . . .	Number	 00010067h   
+@@_PageCommitContig  . . . . . .	Number	 00010156h   
+@@_PageCommitPhys  . . . . . . .	Number	 00010128h   
+@@_PageCommit  . . . . . . . . .	Number	 0001011Eh   
+@@_PageDecommit  . . . . . . . .	Number	 0001011Fh   
+@@_PageDiscardPages  . . . . . .	Number	 00010069h   
+@@_PageFlush . . . . . . . . . .	Number	 00010126h   
+@@_PageFree  . . . . . . . . . .	Number	 00010055h   
+@@_PageGetAllocInfo  . . . . . .	Number	 00010059h   
+@@_PageGetSizeAddr . . . . . . .	Number	 00010058h   
+@@_PageLock  . . . . . . . . . .	Number	 00010056h   
+@@_PageModifyPermissions . . . .	Number	 00010133h   
+@@_PageOutDirtyPages . . . . . .	Number	 00010068h   
+@@_PageOutPages  . . . . . . . .	Number	 00010192h   
+@@_PageQuery . . . . . . . . . .	Number	 00010134h   
+@@_PageReAllocate  . . . . . . .	Number	 00010054h   
+@@_PageReserve . . . . . . . . .	Number	 0001011Dh   
+@@_PageResetHandlePAddr  . . . .	Number	 000100D3h   
+@@_PageUnLock  . . . . . . . . .	Number	 00010057h   
+@@_PagerDeregister . . . . . . .	Number	 00010122h   
+@@_PagerQuery  . . . . . . . . .	Number	 00010121h   
+@@_PagerRegister . . . . . . . .	Number	 00010120h   
+@@_PhysIntoV86 . . . . . . . . .	Number	 0001005Eh   
+@@_RegCloseKey . . . . . . . . .	Number	 00010149h   
+@@_RegCreateDynKey . . . . . . .	Number	 00010176h   
+@@_RegCreateKey  . . . . . . . .	Number	 0001014Ah   
+@@_RegDeleteKey  . . . . . . . .	Number	 0001014Bh   
+@@_RegDeleteValue  . . . . . . .	Number	 0001014Fh   
+@@_RegEnumKey  . . . . . . . . .	Number	 0001014Ch   
+@@_RegEnumValue  . . . . . . . .	Number	 00010150h   
+@@_RegFlushKey . . . . . . . . .	Number	 00010155h   
+@@_RegOpenKey  . . . . . . . . .	Number	 00010148h   
+@@_RegQueryInfoKey . . . . . . .	Number	 0001015Eh   
+@@_RegQueryMultipleValues  . . .	Number	 00010177h   
+@@_RegQueryValueEx . . . . . . .	Number	 00010151h   
+@@_RegQueryValue . . . . . . . .	Number	 0001014Dh   
+@@_RegRemapPreDefKey . . . . . .	Number	 00010171h   
+@@_RegSetValueEx . . . . . . . .	Number	 00010152h   
+@@_RegSetValue . . . . . . . . .	Number	 0001014Eh   
+@@_RegisterGARTHandler . . . . .	Number	 000101ADh   
+@@_Register_Win32_Services . . .	Number	 00010129h   
+@@_ReleaseMappedCacheBlock . . .	Number	 000101B8h   
+@@_ResumeExecMustComplete  . . .	Number	 00010137h   
+@@_SelectorMapFlat . . . . . . .	Number	 0001006Eh   
+@@_SetDescriptor . . . . . . . .	Number	 0001007Ch   
+@@_SetFreePhysRegCalBk . . . . .	Number	 000100D9h   
+@@_SetLastV86Page  . . . . . . .	Number	 000100D4h   
+@@_SetReclaimableItem  . . . . .	Number	 00010182h   
+@@_SetResetV86Pageable . . . . .	Number	 00010065h   
+@@_Set_Global_Time_Out_Ex  . . .	Number	 000101BCh   
+@@_SignalID  . . . . . . . . . .	Number	 00010127h   
+@@_Sprintf . . . . . . . . . . .	Number	 00010174h   
+@@_TestGlobalV86Mem  . . . . . .	Number	 0001005Fh   
+@@_Trace_Out_Service . . . . . .	Number	 000100F3h   
+@@_UnmapFreePhysReg  . . . . . .	Number	 000100D7h   
+@@_Vsprintfw . . . . . . . . . .	Number	 00010198h   
+@@_Vsprintf  . . . . . . . . . .	Number	 00010197h   
+@@_XchgFreePhysReg . . . . . . .	Number	 000100D8h   
+@@_lmemcpy . . . . . . . . . . .	Number	 0001017Dh   
+@@_lstrcmpi  . . . . . . . . . .	Number	 0001018Eh   
+@@_lstrcpyn  . . . . . . . . . .	Number	 0001017Bh   
+@@_lstrlen . . . . . . . . . . .	Number	 0001017Ch   
+@@_strupr  . . . . . . . . . . .	Number	 0001018Fh   
+ACPI_DEVICE_ID . . . . . . . . .	Number	 004Ch	 
+ACPI_INIT_ORDER  . . . . . . . .	Number	 16800002h   
+AFPP_SWAPOUT . . . . . . . . . .	Number	 0001h	 
+ALDTSPECSEL  . . . . . . . . . .	Number	 0001h	 
+ALLOCFROMEND . . . . . . . . . .	Number	 40000000h   
+ALWAYS_FIELD . . . . . . . . . .	Number	 0200h	 
+APM_DEVICE_ID  . . . . . . . . .	Number	 0026h	 
+APM_INIT_ORDER . . . . . . . . .	Number	 01000000h   
+ASD_ALREADY_SET  . . . . . . . .	Number	 0009h	 
+ASD_BAD_PARAMETER  . . . . . . .	Number	 000Bh	 
+ASD_CHECK_FAIL . . . . . . . . .	Number	 0001h	 
+ASD_CHECK_SUCCESS  . . . . . . .	Number	 0002h	 
+ASD_CHECK_UNKNOWN  . . . . . . .	Number	 0003h	 
+ASD_CLEAN_BOOT . . . . . . . . .	Number	 0006h	 
+ASD_ERROR_BAD_TIME . . . . . . .	Number	 0004h	 
+ASD_ERROR_NONE . . . . . . . . .	Number	 0000h	 
+ASD_FILE_ERROR . . . . . . . . .	Number	 0008h	 
+ASD_FLAG_STRING  . . . . . . . .	Number	 0001h	 
+ASD_MAX_REF_DATA . . . . . . . .	Number	 0100h	 
+ASD_MISSING_CHECK  . . . . . . .	Number	 000Ah	 
+ASD_OP_CHECK_AND_ALWAYS_WRITE_FAIL .	Number	 0001h	 
+ASD_OP_CHECK_AND_WRITE_FAIL_IF_UNKNOWN . Number	  0000h	  
+ASD_OP_CHECK . . . . . . . . . .	Number	 0002h	 
+ASD_OP_DONE_AND_SET_SUCCESS  . .	Number	 0003h	 
+ASD_OP_DONE  . . . . . . . . . .	Number	 0007h	 
+ASD_OP_SET_FAIL  . . . . . . . .	Number	 0004h	 
+ASD_OP_SET_SUCCESS . . . . . . .	Number	 0005h	 
+ASD_OP_SET_UNKNOWN . . . . . . .	Number	 0006h	 
+ASD_OUT_OF_MEMORY  . . . . . . .	Number	 0007h	 
+ASD_REGISTRY_ERROR . . . . . . .	Number	 0005h	 
+ASSERT_RANGE_BITS  . . . . . . .	Number	 80000003h   
+ASSERT_RANGE_IS_ASCIIZ . . . . .	Number	 0002h	 
+ASSERT_RANGE_IS_NOT_ASCIIZ . . .	Number	 0000h	 
+ASSERT_RANGE_NO_DEBUG  . . . . .	Number	 -80000000h   
+ASSERT_RANGE_NULL_BAD  . . . . .	Number	 0000h	 
+ASSERT_RANGE_NULL_OK . . . . . .	Number	 0001h	 
+AWREDIR_DEVICE_ID  . . . . . . .	Number	 0049h	 
+BASEID_FOR_NAMEBASEDVXD_MASK . .	Number	 0FFFh	 
+BASEID_FOR_NAMEBASEDVXD  . . . .	Number	 F000h	 
+BDDEXPLICITDPL . . . . . . . . .	Number	 0001h	 
+BEGIN_MESSAGE_MODE . . . . . . .	Number	 0010h	 
+BEGIN_PM_APP . . . . . . . . . .	Number	 0015h	 
+BEGIN_RESERVED_PRIVATE_SYSTEM_CONTROL 	Number	 70000000h   
+BIOSHOOK_DEVICE_ID . . . . . . .	Number	 001Fh	 
+BIOSHOOK_INIT_ORDER  . . . . . .	Number	 06000000h   
+BIOSXLAT_DEVICE_ID . . . . . . .	Number	 0013h	 
+BIOSXLAT_INIT_ORDER  . . . . . .	Number	 50000000h   
+BIOS_DEVICE_ID . . . . . . . . .	Number	 003Dh	 
+BIOS_EXT_DEVICE_ID . . . . . . .	Number	 0029h	 
+BIOS_INIT_ORDER  . . . . . . . .	Number	 16800001h   
+BLD_COFF . . . . . . . . . . . .	Text   	 
+BLOCKDEV_DEVICE_ID . . . . . . .	Number	 0010h	 
+BLOCKDEV_INIT_ORDER  . . . . . .	Number	 40000000h   
+BOOT_CLEAN . . . . . . . . . . .	Number	 0001h	 
+BOOT_DOSCLEAN  . . . . . . . . .	Number	 0002h	 
+BOOT_INTERACTIVE . . . . . . . .	Number	 0008h	 
+BOOT_NETCLEAN  . . . . . . . . .	Number	 0004h	 
+BPA_32_BIT_FLAG  . . . . . . . .	Number	 0001h	 
+BPA_32_BIT . . . . . . . . . . .	Number	 0001h	 
+CBDOS  . . . . . . . . . . . . .	Number	 00400000h   
+CBPRIVATE  . . . . . . . . . . .	Number	 7FC00000h   
+CBSHARED . . . . . . . . . . . .	Number	 40000000h   
+CBSYSTEM . . . . . . . . . . . .	Number	 3FC00000h   
+CHBIOS_Device_ID . . . . . . . .	Number	 0061h	 
+CLOSE_VM_NOTIFY2 . . . . . . . .	Number	 002Fh	 
+CLOSE_VM_NOTIFY  . . . . . . . .	Number	 0019h	 
+COMMDRVR_INIT_ORDER  . . . . . .	Number	 2FFFFFFFh   
+COMNFS_FLAT  . . . . . . . . . .	Number	 FFFFFFFFh   
+CONFIGMG_DEVICE_ID . . . . . . .	Number	 0033h	 
+CONFIGMG_INIT_ORDER  . . . . . .	Number	 16400000h   
+CPGDOS . . . . . . . . . . . . .	Number	 0400h	 
+CPGPRIVATE . . . . . . . . . . .	Number	 0007FC00h   
+CPGSHARED  . . . . . . . . . . .	Number	 00040000h   
+CPGSYSTEM  . . . . . . . . . . .	Number	 0003FC00h   
+CREATE_PROCESS . . . . . . . . .	Number	 0033h	 
+CREATE_THREAD  . . . . . . . . .	Number	 001Dh	 
+CREATE_VM  . . . . . . . . . . .	Number	 0007h	 
+CRIT_REBOOT_NOTIFY2  . . . . . .	Number	 002Eh	 
+CRIT_REBOOT_NOTIFY . . . . . . .	Number	 0018h	 
+CVF_CONTINUE_EXEC_BIT  . . . . .	Number	 0000h	 
+CVF_CONTINUE_EXEC  . . . . . . .	Number	 0001h	 
+CVNF_CRIT_CLOSE_BIT  . . . . . .	Number	 0000h	 
+CVNF_CRIT_CLOSE  . . . . . . . .	Number	 0001h	 
+DDS_DEVICE_ID  . . . . . . . . .	Number	 004Ah	 
+DEBLEVELMAX  . . . . . . . . . .	Number	 0002h	 
+DEBLEVELNORMAL . . . . . . . . .	Number	 0001h	 
+DEBLEVELRETAIL . . . . . . . . .	Number	 0000h	 
+DEBLEVEL . . . . . . . . . . . .	Text   	 1
+DEBUGCMD_DEVICE_ID . . . . . . .	Number	 002Eh	 
+DEBUGCMD_INIT_ORDER  . . . . . .	Number	 0000h	 
+DEBUG_DEVICE_ID  . . . . . . . .	Number	 0002h	 
+DEBUG_INIT_ORDER . . . . . . . .	Number	 0000h	 
+DEBUG_QUERY  . . . . . . . . . .	Number	 0014h	 
+DEBUG  . . . . . . . . . . . . .	Text   	 
+DESTROY_PROCESS  . . . . . . . .	Number	 0034h	 
+DESTROY_THREAD . . . . . . . . .	Number	 0021h	 
+DESTROY_VM2  . . . . . . . . . .	Number	 0029h	 
+DESTROY_VM . . . . . . . . . . .	Number	 000Ch	 
+DEVICE_INIT  . . . . . . . . . .	Number	 0001h	 
+DEVICE_REBOOT_NOTIFY2  . . . . .	Number	 002Dh	 
+DEVICE_REBOOT_NOTIFY . . . . . .	Number	 0017h	 
+DFS_ENTER_NOBLOCK  . . . . . . .	Number	 FFFFFFC0h   
+DFS_EXIT_NOBLOCK . . . . . . . .	Number	 FFFFFF80h   
+DFS_LOG_BIT  . . . . . . . . . .	Number	 0000h	 
+DFS_LOG  . . . . . . . . . . . .	Number	 0001h	 
+DFS_NEVER_REENTER_BIT  . . . . .	Number	 0003h	 
+DFS_NEVER_REENTER  . . . . . . .	Number	 0008h	 
+DFS_NOT_SWAPPING_BIT . . . . . .	Number	 0005h	 
+DFS_NOT_SWAPPING . . . . . . . .	Number	 0020h	 
+DFS_PROFILE_BIT  . . . . . . . .	Number	 0001h	 
+DFS_PROFILE  . . . . . . . . . .	Number	 0002h	 
+DFS_RARE_SERVICES  . . . . . . .	Number	 FFFFFF80h   
+DFS_TEST_BLOCK_BIT . . . . . . .	Number	 0006h	 
+DFS_TEST_BLOCK . . . . . . . . .	Number	 0040h	 
+DFS_TEST_CLD_BIT . . . . . . . .	Number	 0002h	 
+DFS_TEST_CLD . . . . . . . . . .	Number	 0004h	 
+DFS_TEST_NEST_EXEC . . . . . . .	Number	 FFFFFF81h   
+DFS_TEST_REENTER_BIT . . . . . .	Number	 0004h	 
+DFS_TEST_REENTER . . . . . . . .	Number	 0010h	 
+DFS_WIMP_DEBUG . . . . . . . . .	Number	 FFFFFF82h   
+DIOC_CLOSEHANDLE . . . . . . . .	Number	 -0001h	  
+DIOC_GETVERSION  . . . . . . . .	Number	 0000h	 
+DIOC_OPEN  . . . . . . . . . . .	Number	 0000h	 
+DOSMGR_DEVICE_ID . . . . . . . .	Number	 0015h	 
+DOSMGR_INIT_ORDER  . . . . . . .	Number	 58000000h   
+DOSNET_DEVICE_ID . . . . . . . .	Number	 001Ah	 
+DOSNET_INIT_ORDER  . . . . . . .	Number	 5C000000h   
+DRAGCLI_DEVICE_ID  . . . . . . .	Number	 0046h	 
+DRAGSRV_DEVICE_ID  . . . . . . .	Number	 0047h	 
+DWCFGMG_DEVICE_ID  . . . . . . .	Number	 0034h	 
+DebFar . . . . . . . . . . . . .	Text   	 NEAR PTR
+EBIOS_DEVICE_ID  . . . . . . . .	Number	 0012h	 
+EBIOS_INIT_ORDER . . . . . . . .	Number	 26000000h   
+EF_Hang_On_Exit  . . . . . . . .	Number	 0001h	 
+EISA_DEVICE_ID . . . . . . . . .	Number	 0045h	 
+EISA_INIT_ORDER  . . . . . . . .	Number	 16800000h   
+ENABLE_DEVICE_ID . . . . . . . .	Number	 0037h	 
+END_MESSAGE_MODE2  . . . . . . .	Number	 002Bh	 
+END_MESSAGE_MODE . . . . . . . .	Number	 0011h	 
+END_PM_APP2  . . . . . . . . . .	Number	 002Ch	 
+END_PM_APP . . . . . . . . . . .	Number	 0016h	 
+END_RESERVED_PRIVATE_SYSTEM_CONTROL 	Number	 7FFFFFFFh   
+ENUMERATOR_INIT_ORDER  . . . . .	Number	 16800000h   
+ETEN_Device_ID . . . . . . . . .	Number	 0060h	 
+FALSE  . . . . . . . . . . . . .	Number	 0000h	 
+FLUSHCACHES_FORCE_PAGES_OUT  . .	Number	 0004h	 
+FLUSHCACHES_GET_CACHE_LINE_PTR .	Number	 0001h	 
+FLUSHCACHES_GET_CACHE_SIZE_PTR .	Number	 0002h	 
+FLUSHCACHES_LOCK_LOCKABLE  . . .	Number	 0005h	 
+FLUSHCACHES_NORMAL . . . . . . .	Number	 0000h	 
+FLUSHCACHES_TAKE_OVER  . . . . .	Number	 0003h	 
+FLUSHCACHES_UNLOCK_LOCKABLE  . .	Number	 0006h	 
+FSD_Init_Order . . . . . . . . .	Number	 A0010100h   
+GET_CONTENTION_HANDLER . . . . .	Number	 0030h	 
+GMIF_4MEGPG_BIT  . . . . . . . .	Number	 0016h	 
+GMIF_4MEGPG  . . . . . . . . . .	Number	 00400000h   
+GMIF_80486_BIT . . . . . . . . .	Number	 0010h	 
+GMIF_80486 . . . . . . . . . . .	Number	 00010000h   
+GMIF_80586_BIT . . . . . . . . .	Number	 0015h	 
+GMIF_80586 . . . . . . . . . . .	Number	 00200000h   
+GMIF_CPUID_BIT . . . . . . . . .	Number	 0014h	 
+GMIF_CPUID . . . . . . . . . . .	Number	 00100000h   
+GMIF_EISA_BIT  . . . . . . . . .	Number	 0013h	 
+GMIF_EISA  . . . . . . . . . . .	Number	 00080000h   
+GMIF_MCA_BIT . . . . . . . . . .	Number	 0012h	 
+GMIF_MCA . . . . . . . . . . . .	Number	 00040000h   
+GMIF_PCXT_BIT  . . . . . . . . .	Number	 0011h	 
+GMIF_PCXT  . . . . . . . . . . .	Number	 00020000h   
+GMIF_RDTSC_BIT . . . . . . . . .	Number	 0017h	 
+GMIF_RDTSC . . . . . . . . . . .	Number	 00800000h   
+GNA_HIDOSLINKED  . . . . . . . .	Number	 0002h	 
+GNA_ISHIGHDOS  . . . . . . . . .	Number	 0004h	 
+GSDVME_CRTNOMSG  . . . . . . . .	Number	 00020009h   
+GSDVME_DEVNUKEHDWR . . . . . . .	Number	 00010008h   
+GSDVME_DEVNUKE . . . . . . . . .	Number	 00010007h   
+GSDVME_INSMEMDEV . . . . . . . .	Number	 00020008h   
+GSDVME_INSMEMEMS . . . . . . . .	Number	 00020004h   
+GSDVME_INSMEMV86HI . . . . . . .	Number	 00020005h   
+GSDVME_INSMEMV86 . . . . . . . .	Number	 00020001h   
+GSDVME_INSMEMVID . . . . . . . .	Number	 00020006h   
+GSDVME_INSMEMVM  . . . . . . . .	Number	 00020007h   
+GSDVME_INSMEMXMS . . . . . . . .	Number	 00020003h   
+GSDVME_INSV86SPACE . . . . . . .	Number	 00020002h   
+GSDVME_INVALFLT  . . . . . . . .	Number	 00010005h   
+GSDVME_INVALGPFLT  . . . . . . .	Number	 00010004h   
+GSDVME_INVALINST . . . . . . . .	Number	 00010002h   
+GSDVME_INVALPGFLT  . . . . . . .	Number	 00010003h   
+GSDVME_NUKENOMSG . . . . . . . .	Number	 00010009h   
+GSDVME_OKNUKEMASK  . . . . . . .	Number	 -80000000h   
+GSDVME_PRIVINST  . . . . . . . .	Number	 00010001h   
+GSDVME_USERNUKE  . . . . . . . .	Number	 00010006h   
+GSPOC_F_GET  . . . . . . . . . .	Number	 0001h	 
+GSRDP_Set  . . . . . . . . . . .	Number	 0001h	 
+GVDADWordAlign . . . . . . . . .	Number	 0002h	 
+GVDAForceLow . . . . . . . . . .	Number	 4000h	 
+GVDAHighSysCritOK  . . . . . . .	Number	 1000h	 
+GVDAInquire  . . . . . . . . . .	Number	 0800h	 
+GVDAInstance . . . . . . . . . .	Number	 0100h	 
+GVDAOptInstance  . . . . . . . .	Number	 2000h	 
+GVDAPageAlign  . . . . . . . . .	Number	 0008h	 
+GVDAParaAlign  . . . . . . . . .	Number	 0004h	 
+GVDAReclaim  . . . . . . . . . .	Number	 0400h	 
+GVDAWordAlign  . . . . . . . . .	Number	 0001h	 
+GVDAZeroInit . . . . . . . . . .	Number	 0200h	 
+HEAPALIGN_128K . . . . . . . . .	Number	 000D0000h   
+HEAPALIGN_128  . . . . . . . . .	Number	 00030000h   
+HEAPALIGN_16K  . . . . . . . . .	Number	 000A0000h   
+HEAPALIGN_16 . . . . . . . . . .	Number	 0000h	 
+HEAPALIGN_1K . . . . . . . . . .	Number	 00060000h   
+HEAPALIGN_256  . . . . . . . . .	Number	 00040000h   
+HEAPALIGN_2K . . . . . . . . . .	Number	 00070000h   
+HEAPALIGN_32K  . . . . . . . . .	Number	 000B0000h   
+HEAPALIGN_32 . . . . . . . . . .	Number	 00010000h   
+HEAPALIGN_4K . . . . . . . . . .	Number	 00080000h   
+HEAPALIGN_4  . . . . . . . . . .	Number	 0000h	 
+HEAPALIGN_512  . . . . . . . . .	Number	 00050000h   
+HEAPALIGN_64K  . . . . . . . . .	Number	 000C0000h   
+HEAPALIGN_64 . . . . . . . . . .	Number	 00020000h   
+HEAPALIGN_8K . . . . . . . . . .	Number	 00090000h   
+HEAPALIGN_8  . . . . . . . . . .	Number	 0000h	 
+HEAPALIGN_MASK . . . . . . . . .	Number	 000F0000h   
+HEAPALIGN_SHIFT  . . . . . . . .	Number	 0010h	 
+HEAPCLEAN  . . . . . . . . . . .	Number	 0800h	 
+HEAPCONTIG . . . . . . . . . . .	Number	 1000h	 
+HEAPFORGET . . . . . . . . . . .	Number	 2000h	 
+HEAPINIT . . . . . . . . . . . .	Number	 0400h	 
+HEAPLOCKEDHIGH . . . . . . . . .	Number	 0000h	 
+HEAPLOCKEDIFDP . . . . . . . . .	Number	 0100h	 
+HEAPLOCKEDLOW  . . . . . . . . .	Number	 0300h	 
+HEAPNOCOPY . . . . . . . . . . .	Number	 0004h	 
+HEAPPREEMPT  . . . . . . . . . .	Number	 0600h	 
+HEAPSWAP . . . . . . . . . . . .	Number	 0200h	 
+HEAPSYSVM  . . . . . . . . . . .	Number	 0500h	 
+HEAPTYPEMASK . . . . . . . . . .	Number	 0700h	 
+HEAPTYPESHIFT  . . . . . . . . .	Number	 0008h	 
+HEAPZEROINIT . . . . . . . . . .	Number	 0001h	 
+HEAPZEROREINIT . . . . . . . . .	Number	 0002h	 
+HKEY_CLASSES_ROOT  . . . . . . .	Number	 -80000000h   
+HKEY_CURRENT_CONFIG  . . . . . .	Number	 80000005h   
+HKEY_CURRENT_USER  . . . . . . .	Number	 80000001h   
+HKEY_DYN_DATA  . . . . . . . . .	Number	 80000006h   
+HKEY_LOCAL_MACHINE . . . . . . .	Number	 80000002h   
+HKEY_PERFORMANCE_DATA  . . . . .	Number	 80000004h   
+HKEY_USERS . . . . . . . . . . .	Number	 80000003h   
+IFSMgr_Device_ID . . . . . . . .	Number	 0040h	 
+IFSMgr_Init_Order  . . . . . . .	Number	 A0010000h   
+INDOS_FIELD  . . . . . . . . . .	Number	 0100h	 
+INITLOG  . . . . . . . . . . . .	Text   	 
+INIT_COMPLETE  . . . . . . . . .	Number	 0002h	 
+INSTINFO_ALL . . . . . . . . . .	Number	 0002h	 
+INSTINFO_NONE  . . . . . . . . .	Number	 0000h	 
+INSTINFO_SOME  . . . . . . . . .	Number	 0001h	 
+INT13_DEVICE_ID  . . . . . . . .	Number	 0020h	 
+INT13_INIT_ORDER . . . . . . . .	Number	 42000000h   
+IOS_INIT_ORDER . . . . . . . . .	Number	 17000000h   
+IPF_INVTYP . . . . . . . . . . .	Number	 0008h	 
+IPF_PGDIR  . . . . . . . . . . .	Number	 0001h	 
+IPF_PGERR  . . . . . . . . . . .	Number	 0010h	 
+IPF_PM . . . . . . . . . . . . .	Number	 0080h	 
+IPF_REFLT  . . . . . . . . . . .	Number	 0020h	 
+IPF_V86PGH . . . . . . . . . . .	Number	 0004h	 
+IPF_V86PG  . . . . . . . . . . .	Number	 0002h	 
+IPF_V86  . . . . . . . . . . . .	Number	 0100h	 
+IPF_VMM  . . . . . . . . . . . .	Number	 0040h	 
+ISAPNP_DEVICE_ID . . . . . . . .	Number	 003Ch	 
+ISAPNP_INIT_ORDER  . . . . . . .	Number	 16800000h   
+IS_32  . . . . . . . . . . . . .	Text   	 
+KERNEL32_INITIALIZED . . . . . .	Number	 0031h	 
+KERNEL32_SHUTDOWN  . . . . . . .	Number	 0032h	 
+LF_ALLOC_ERROR_BIT . . . . . . .	Number	 0002h	 
+LF_ALLOC_ERROR . . . . . . . . .	Number	 0004h	 
+LF_ASYNC_BIT . . . . . . . . . .	Number	 0000h	 
+LF_ASYNC . . . . . . . . . . . .	Number	 0001h	 
+LF_SWAP  . . . . . . . . . . . .	Number	 000Ah	 
+LF_USE_HEAP_BIT  . . . . . . . .	Number	 0001h	 
+LF_USE_HEAP  . . . . . . . . . .	Number	 0002h	 
+MAPV86_IGNOREWRAP  . . . . . . .	Number	 0001h	 
+MASM6  . . . . . . . . . . . . .	Text   	 
+MAXDOSLADDR  . . . . . . . . . .	Number	 003FFFFFh   
+MAXDOSPAGE . . . . . . . . . . .	Number	 03FFh	 
+MAXPRIVATELADDR  . . . . . . . .	Number	 7FFFFFFFh   
+MAXPRIVATEPAGE . . . . . . . . .	Number	 0007FFFFh   
+MAXSHAREDLADDR . . . . . . . . .	Number	 BFFFFFFFh   
+MAXSHAREDPAGE  . . . . . . . . .	Number	 000BFFFFh   
+MAXSYSTEMLADDR . . . . . . . . .	Number	 FFBFFFFFh   
+MAXSYSTEMPAGE  . . . . . . . . .	Number	 000FFBFFh   
+MAX_SYSTEM_CONTROL . . . . . . .	Number	 0036h	 
+MCA_POS_DEVICE_ID  . . . . . . .	Number	 0023h	 
+MCA_POS_INIT_ORDER . . . . . . .	Number	 41000000h   
+MEM_COMMIT . . . . . . . . . . .	Number	 1000h	 
+MEM_FREE . . . . . . . . . . . .	Number	 00010000h   
+MEM_PRIVATE  . . . . . . . . . .	Number	 00020000h   
+MEM_RESERVE  . . . . . . . . . .	Number	 2000h	 
+MINDOSLADDR  . . . . . . . . . .	Number	 0000h	 
+MINDOSPAGE . . . . . . . . . . .	Number	 0000h	 
+MINPRIVATELADDR  . . . . . . . .	Number	 00400000h   
+MINPRIVATEPAGE . . . . . . . . .	Number	 0400h	 
+MINSHAREDLADDR . . . . . . . . .	Number	 -80000000h   
+MINSHAREDPAGE  . . . . . . . . .	Number	 00080000h   
+MINSYSTEMLADDR . . . . . . . . .	Number	 C0000000h   
+MINSYSTEMPAGE  . . . . . . . . .	Number	 000C0000h   
+MMGRHMADISABLE . . . . . . . . .	Number	 0004h	 
+MMGRHMAENABLE  . . . . . . . . .	Number	 0002h	 
+MMGRHMAPHYSICAL  . . . . . . . .	Number	 0001h	 
+MMGRHMAQUERY . . . . . . . . . .	Number	 0008h	 
+MODEM_INIT_ORDER . . . . . . . .	Number	 2FFFFFFCh   
+MPL_Cached . . . . . . . . . . .	Number	 0004h	 
+MPL_FrameBufferCached  . . . . .	Number	 0002h	 
+MPL_HardwareCoherentCached . . .	Number	 0001h	 
+MPL_NonCached  . . . . . . . . .	Number	 0000h	 
+MRCI2_DEVICE_ID  . . . . . . . .	Number	 0042h	 
+MTRR_UC  . . . . . . . . . . . .	Number	 0000h	 
+MTRR_WB  . . . . . . . . . . . .	Number	 0006h	 
+MTRR_WC  . . . . . . . . . . . .	Number	 0001h	 
+MTRR_WP  . . . . . . . . . . . .	Number	 0005h	 
+MTRR_WT  . . . . . . . . . . . .	Number	 0004h	 
+MUTEX_MUST_COMPLETE  . . . . . .	Number	 0001h	 
+MUTEX_NO_CLEANUP_THREAD_STATE  .	Number	 0002h	 
+NDIS_DEVICE_ID . . . . . . . . .	Number	 0028h	 
+NONSTANDARD_CCALL  . . . . . . .	Number	 0001h	 
+NTKERN_DEVICE_ID . . . . . . . .	Number	 004Bh	 
+NTKERN_INIT_ORDER  . . . . . . .	Number	 16200000h   
+Num_VMM_Services . . . . . . . .	Number	 01BEh	 
+OFFSET32 . . . . . . . . . . . .	Text   	 OFFSET FLAT:
+OPTIONAL_FIELD . . . . . . . . .	Number	 0400h	 
+PAGECLEARV86INTSLOCKED . . . . .	Number	 1000h	 
+PAGECLEARV86PAGEABLE . . . . . .	Number	 0400h	 
+PAGECONTIG . . . . . . . . . . .	Number	 0004h	 
+PAGEDEBUGNULFAULT  . . . . . . .	Number	 0010h	 
+PAGEDISCARD  . . . . . . . . . .	Number	 00010000h   
+PAGEFILE_DEVICE_ID . . . . . . .	Number	 0021h	 
+PAGEFILE_INIT_ORDER  . . . . . .	Number	 18000000h   
+PAGEFIXED  . . . . . . . . . . .	Number	 0008h	 
+PAGELOCKEDIFDP . . . . . . . . .	Number	 0100h	 
+PAGELOCKED . . . . . . . . . . .	Number	 0080h	 
+PAGEMAPFREEPHYSREG . . . . . . .	Number	 00040000h   
+PAGEMAPGLOBAL  . . . . . . . . .	Number	 40000000h   
+PAGEMARKDIRTY  . . . . . . . . .	Number	 -80000000h   
+PAGEMARKPAGEOUT  . . . . . . . .	Number	 2000h	 
+PAGEMASK . . . . . . . . . . . .	Number	 0FFFh	 
+PAGENOCOPY . . . . . . . . . . .	Number	 0040h	 
+PAGENOMOVE . . . . . . . . . . .	Number	 10000000h   
+PAGEOUT_ALL  . . . . . . . . . .	Number	 0007h	 
+PAGEOUT_PRIVATE  . . . . . . . .	Number	 0001h	 
+PAGEOUT_REGION . . . . . . . . .	Number	 0008h	 
+PAGEOUT_SHARED . . . . . . . . .	Number	 0002h	 
+PAGEOUT_SYSTEM . . . . . . . . .	Number	 0004h	 
+PAGEPDPCLEARBASE . . . . . . . .	Number	 8000h	 
+PAGEPDPQUERYDIRTY  . . . . . . .	Number	 00020000h   
+PAGEPDPSETBASE . . . . . . . . .	Number	 4000h	 
+PAGEPHYSONLY . . . . . . . . . .	Number	 04000000h   
+PAGESETV86INTSLOCKED . . . . . .	Number	 0800h	 
+PAGESETV86PAGEABLE . . . . . . .	Number	 0200h	 
+PAGESHIFT  . . . . . . . . . . .	Number	 000Ch	 
+PAGESIZE . . . . . . . . . . . .	Number	 1000h	 
+PAGESWAP_DEVICE_ID . . . . . . .	Number	 0007h	 
+PAGESWAP_INIT_ORDER  . . . . . .	Number	 1C000000h   
+PAGEUSEALIGN . . . . . . . . . .	Number	 0002h	 
+PAGEZEROINIT . . . . . . . . . .	Number	 0001h	 
+PAGEZEROREINIT . . . . . . . . .	Number	 0020h	 
+PAGE_NOACCESS  . . . . . . . . .	Number	 0001h	 
+PAGE_READONLY  . . . . . . . . .	Number	 0002h	 
+PAGE_READWRITE . . . . . . . . .	Number	 0004h	 
+PARITY_DEVICE_ID . . . . . . . .	Number	 0008h	 
+PARITY_INIT_ORDER  . . . . . . .	Number	 20000000h   
+PCC_NOLIN  . . . . . . . . . . .	Number	 10000000h   
+PCC_ZEROINIT . . . . . . . . . .	Number	 0001h	 
+PCI_DEVICE_ID  . . . . . . . . .	Number	 0043h	 
+PCI_INIT_ORDER . . . . . . . . .	Number	 16800000h   
+PCP_CHANGEPAGERDATA  . . . . . .	Number	 0002h	 
+PCP_CHANGEPAGER  . . . . . . . .	Number	 0001h	 
+PCP_VIRGINONLY . . . . . . . . .	Number	 0004h	 
+PC_CACHEDIS  . . . . . . . . . .	Number	 00100000h   
+PC_CACHEWT . . . . . . . . . . .	Number	 00080000h   
+PC_DIRTY . . . . . . . . . . . .	Number	 08000000h   
+PC_FIXED . . . . . . . . . . . .	Number	 0008h	 
+PC_INCR  . . . . . . . . . . . .	Number	 40000000h   
+PC_LOCKEDIFDP  . . . . . . . . .	Number	 0100h	 
+PC_LOCKED  . . . . . . . . . . .	Number	 0080h	 
+PC_PAGEFLUSH . . . . . . . . . .	Number	 8000h	 
+PC_PRESENT . . . . . . . . . . .	Number	 -80000000h   
+PC_STATIC  . . . . . . . . . . .	Number	 20000000h   
+PC_USER  . . . . . . . . . . . .	Number	 00040000h   
+PC_WRITEABLE . . . . . . . . . .	Number	 00020000h   
+PD_FIXEDZERO . . . . . . . . . .	Number	 0003h	 
+PD_FIXED . . . . . . . . . . . .	Number	 0004h	 
+PD_NESTEXEC  . . . . . . . . . .	Number	 0002h	 
+PD_NOINIT  . . . . . . . . . . .	Number	 0002h	 
+PD_PAGERONLY . . . . . . . . . .	Number	 0001h	 
+PD_SWAPPER . . . . . . . . . . .	Number	 0000h	 
+PD_ZEROINIT  . . . . . . . . . .	Number	 0001h	 
+PELOADER_DEVICE_ID . . . . . . .	Number	 0044h	 
+PERF_DEVICE_ID . . . . . . . . .	Number	 0048h	 
+PERF_INIT_ORDER  . . . . . . . .	Number	 00900000h   
+PG_UNCACHED  . . . . . . . . . .	Number	 0001h	 
+PG_WRITECOMBINED . . . . . . . .	Number	 0002h	 
+PHYSINFO_ALL . . . . . . . . . .	Number	 0002h	 
+PHYSINFO_NONE  . . . . . . . . .	Number	 0000h	 
+PHYSINFO_SOME  . . . . . . . . .	Number	 0001h	 
+PNP_NEW_DEVNODE  . . . . . . . .	Number	 0022h	 
+PORT_INIT_ORDER  . . . . . . . .	Number	 2FFFFFFBh   
+POWER_EVENT  . . . . . . . . . .	Number	 001Ah	 
+PRTCL_INIT_ORDER . . . . . . . .	Number	 2FFFFFFDh   
+PR_4MEG  . . . . . . . . . . . .	Number	 0001h	 
+PR_FIXED . . . . . . . . . . . .	Number	 0008h	 
+PR_PRIVATE . . . . . . . . . . .	Number	 80000400h   
+PR_SHARED  . . . . . . . . . . .	Number	 80060000h   
+PR_STATIC  . . . . . . . . . . .	Number	 0010h	 
+PR_SYSTEM  . . . . . . . . . . .	Number	 80080000h   
+QUERY_DESTROY  . . . . . . . . .	Number	 0013h	 
+REBOOT_DEVICE_ID . . . . . . . .	Number	 0009h	 
+REBOOT_INIT_ORDER  . . . . . . .	Number	 24000000h   
+REBOOT_PROCESSOR . . . . . . . .	Number	 0012h	 
+REGKEY_CREATE_IFNOTEXIST . . . .	Number	 0001h	 
+REGKEY_OPEN  . . . . . . . . . .	Number	 0000h	 
+REGTYPE_CLASS  . . . . . . . . .	Number	 0001h	 
+REGTYPE_ENUM . . . . . . . . . .	Number	 0000h	 
+REGTYPE_VXD  . . . . . . . . . .	Number	 0002h	 
+REG_BINARY . . . . . . . . . . .	Number	 0003h	 
+REG_SZ . . . . . . . . . . . . .	Number	 0001h	 
+RS_DOSARENA  . . . . . . . . . .	Number	 0004h	 
+RS_RECLAIM . . . . . . . . . . .	Number	 0001h	 
+RS_RESTORE . . . . . . . . . . .	Number	 0002h	 
+SCHED_OBJ_ID_THREAD  . . . . . .	Number	 42434854h   
+SCSIFD_DEVICE_ID . . . . . . . .	Number	 0024h	 
+SCSIFD_INIT_ORDER  . . . . . . .	Number	 41400000h   
+SCSIMASTER_INIT_ORDER  . . . . .	Number	 41800000h   
+SCSIPORT_DEVICE_ID . . . . . . .	Number	 0035h	 
+SCSI_DEVICE_ID . . . . . . . . .	Number	 0022h	 
+SET_DEVICE_FOCUS . . . . . . . .	Number	 000Fh	 
+SHELL_DEVICE_ID  . . . . . . . .	Number	 0017h	 
+SHELL_INIT_ORDER . . . . . . . .	Number	 B0000000h   
+SMCLIB_DEVICE_ID . . . . . . . .	Number	 004Eh	 
+SPOOLER_DEVICE_ID  . . . . . . .	Number	 002Ch	 
+SYSSTATE_KERNEL32INITED  . . . .	Number	 50000000h   
+SYSSTATE_KERNEL32TERMINATED  . .	Number	 A0000000h   
+SYSSTATE_POSTSYSCRITEXIT2  . . .	Number	 FFF00000h   
+SYSSTATE_PRECRITREBOOT . . . . .	Number	 FFFFF000h   
+SYSSTATE_PREDEVICEINIT . . . . .	Number	 10000000h   
+SYSSTATE_PREDEVICEREBOOT . . . .	Number	 FFFF0000h   
+SYSSTATE_PREINITCOMPLETE . . . .	Number	 20000000h   
+SYSSTATE_PREREBOOTCPU  . . . . .	Number	 FFFFFF00h   
+SYSSTATE_PRESYSCRITEXIT2 . . . .	Number	 F4000000h   
+SYSSTATE_PRESYSCRITEXIT  . . . .	Number	 F0000000h   
+SYSSTATE_PRESYSCRITINIT  . . . .	Number	 0000h	 
+SYSSTATE_PRESYSTEMEXIT2  . . . .	Number	 E4000000h   
+SYSSTATE_PRESYSTEMEXIT . . . . .	Number	 E0000000h   
+SYSSTATE_PRESYSVMTERMINATE . . .	Number	 B0000000h   
+SYSSTATE_VXDINITCOMPLETED  . . .	Number	 40000000h   
+SYSTEM_EXIT2 . . . . . . . . . .	Number	 0025h	 
+SYSTEM_EXIT  . . . . . . . . . .	Number	 0005h	 
+SYS_CRITICAL_EXIT2 . . . . . . .	Number	 0026h	 
+SYS_CRITICAL_EXIT  . . . . . . .	Number	 0006h	 
+SYS_CRITICAL_INIT  . . . . . . .	Number	 0000h	 
+SYS_DYNAMIC_DEVICE_EXIT  . . . .	Number	 001Ch	 
+SYS_DYNAMIC_DEVICE_INIT  . . . .	Number	 001Bh	 
+SYS_DYNAMIC_DEVICE_REINIT  . . .	Number	 0035h	 
+SYS_POWER_DOWN . . . . . . . . .	Number	 0036h	 
+SYS_VM_INIT  . . . . . . . . . .	Number	 0003h	 
+SYS_VM_TERMINATE2  . . . . . . .	Number	 0024h	 
+SYS_VM_TERMINATE . . . . . . . .	Number	 0004h	 
+TERMINATE_THREAD . . . . . . . .	Number	 001Fh	 
+THFLAG_ANSI  . . . . . . . . . .	Number	 0000h	 
+THFLAG_ASYNC_THREAD_BIT  . . . .	Number	 001Fh	 
+THFLAG_ASYNC_THREAD  . . . . . .	Number	 -80000000h   
+THFLAG_CHARSET_BITS  . . . . . .	Number	 0010h	 
+THFLAG_CHARSET_MASK  . . . . . .	Number	 00030000h   
+THFLAG_EXTENDED_HANDLES_BIT  . .	Number	 0012h	 
+THFLAG_EXTENDED_HANDLES  . . . .	Number	 00040000h   
+THFLAG_NOT_EXECUTEABLE_BIT . . .	Number	 0004h	 
+THFLAG_NOT_EXECUTEABLE . . . . .	Number	 0010h	 
+THFLAG_OEM . . . . . . . . . . .	Number	 00010000h   
+THFLAG_OPEN_AS_IMMOVABLE_FILE_BIT 	Number	 0013h	 
+THFLAG_OPEN_AS_IMMOVABLE_FILE  .	Number	 00080000h   
+THFLAG_RESERVED  . . . . . . . .	Number	 00030000h   
+THFLAG_RING0_THREAD_BIT  . . . .	Number	 001Ch	 
+THFLAG_RING0_THREAD  . . . . . .	Number	 10000000h   
+THFLAG_SUSPENDED_BIT . . . . . .	Number	 0003h	 
+THFLAG_SUSPENDED . . . . . . . .	Number	 0008h	 
+THFLAG_THREAD_BLOCKED_BIT  . . .	Number	 000Ah	 
+THFLAG_THREAD_BLOCKED  . . . . .	Number	 0400h	 
+THFLAG_THREAD_CREATION_BIT . . .	Number	 0008h	 
+THFLAG_THREAD_CREATION . . . . .	Number	 0100h	 
+THFLAG_UNICODE . . . . . . . . .	Number	 00020000h   
+THREAD_INIT  . . . . . . . . . .	Number	 001Eh	 
+THREAD_Not_Executeable . . . . .	Number	 0020h	 
+THREAD_TERM_STATUS_CRASH_PEND  .	Number	 0001h	 
+THREAD_TERM_STATUS_NUKE_PEND . .	Number	 0002h	 
+THREAD_TERM_STATUS_SUSPEND_PEND 	Number	 0004h	 
+TSRLOAD_DEVICE_ID  . . . . . . .	Number	 001Eh	 
+TVDANeedTilInitComplete  . . . .	Number	 0001h	 
+UDF_DEVICE_ID  . . . . . . . . .	Number	 004Dh	 
+UNDEFINED_DEVICE_ID  . . . . . .	Number	 0000h	 
+UNDEFINED_INIT_ORDER . . . . . .	Number	 -80000000h   
+UNDEF_TOUCH_MEM_INIT_ORDER . . .	Number	 A8000000h   
+V86MMGR_DEVICE_ID  . . . . . . .	Number	 0006h	 
+V86MMGR_INIT_ORDER . . . . . . .	Number	 A0000000h   
+VCDFSD_DEVICE_ID . . . . . . . .	Number	 0041h	 
+VCDFSD_INIT_ORDER  . . . . . . .	Number	 16F00000h   
+VCD_DEVICE_ID  . . . . . . . . .	Number	 000Eh	 
+VCD_INIT_ORDER . . . . . . . . .	Number	 30000000h   
+VCOMM_DEVICE_ID  . . . . . . . .	Number	 002Bh	 
+VCOND_DEVICE_ID  . . . . . . . .	Number	 0038h	 
+VCOND_INIT_ORDER . . . . . . . .	Number	 -80000000h   
+VDD2_DEVICE_ID . . . . . . . . .	Number	 001Ch	 
+VDD_DEVICE_ID  . . . . . . . . .	Number	 000Ah	 
+VDD_INIT_ORDER . . . . . . . . .	Number	 28000000h   
+VDMAD_DEVICE_ID  . . . . . . . .	Number	 0004h	 
+VDMAD_INIT_ORDER . . . . . . . .	Number	 90000000h   
+VDOSKEYD_DEVICE_ID . . . . . . .	Number	 004Bh	 
+VFBACKUP_DEVICE_ID . . . . . . .	Number	 0036h	 
+VFD_DEVICE_ID  . . . . . . . . .	Number	 001Bh	 
+VFD_INIT_ORDER . . . . . . . . .	Number	 A0060000h   
+VHBIOSD_Device_ID  . . . . . . .	Number	 0065h	 
+VIME_Device_ID . . . . . . . . .	Number	 0064h	 
+VKD_DEVICE_ID  . . . . . . . . .	Number	 000Dh	 
+VKD_INIT_ORDER . . . . . . . . .	Number	 38000000h   
+VMCB_ID  . . . . . . . . . . . .	Number	 62634D56h   
+VMCPD_DEVICE_ID  . . . . . . . .	Number	 0011h	 
+VMCPD_INIT_ORDER . . . . . . . .	Number	 48000000h   
+VMD_DEVICE_ID  . . . . . . . . .	Number	 000Ch	 
+VMD_INIT_ORDER . . . . . . . . .	Number	 34000000h   
+VMM_DEVICE_ID  . . . . . . . . .	Number	 0001h	 
+VMM_INIT_ORDER . . . . . . . . .	Number	 0000h	 
+VMM_OPENFILE_BUF_SIZE  . . . . .	Number	 0104h	 
+VMM_TRUE . . . . . . . . . . . .	Number	 FFFFFFFFh   
+VMPOLL_DEVICE_ID . . . . . . . .	Number	 0018h	 
+VMPOLL_INIT_ORDER  . . . . . . .	Number	 64000000h   
+VMSGD_Device_ID  . . . . . . . .	Number	 0062h	 
+VMSTAT_AWAKENING_BIT . . . . . .	Number	 000Bh	 
+VMSTAT_AWAKENING . . . . . . . .	Number	 0800h	 
+VMSTAT_BACKGROUND_BIT  . . . . .	Number	 0001h	 
+VMSTAT_BACKGROUND  . . . . . . .	Number	 0002h	 
+VMSTAT_BLOCKED_BIT . . . . . . .	Number	 000Ah	 
+VMSTAT_BLOCKED . . . . . . . . .	Number	 0400h	 
+VMSTAT_CLOSING_BIT . . . . . . .	Number	 0010h	 
+VMSTAT_CLOSING . . . . . . . . .	Number	 00010000h   
+VMSTAT_CREATING_BIT  . . . . . .	Number	 0002h	 
+VMSTAT_CREATING  . . . . . . . .	Number	 0004h	 
+VMSTAT_EXCLUSIVE_BIT . . . . . .	Number	 0000h	 
+VMSTAT_EXCLUSIVE . . . . . . . .	Number	 0001h	 
+VMSTAT_HIGH_PRI_BACK_BIT . . . .	Number	 0009h	 
+VMSTAT_HIGH_PRI_BACK . . . . . .	Number	 0200h	 
+VMSTAT_IDLE_BIT  . . . . . . . .	Number	 000Fh	 
+VMSTAT_IDLE_TIMEOUT_BIT  . . . .	Number	 000Eh	 
+VMSTAT_IDLE_TIMEOUT  . . . . . .	Number	 4000h	 
+VMSTAT_IDLE  . . . . . . . . . .	Number	 8000h	 
+VMSTAT_NOT_EXECUTEABLE_BIT . . .	Number	 0004h	 
+VMSTAT_NOT_EXECUTEABLE . . . . .	Number	 0010h	 
+VMSTAT_PAGEABLEV86BIT  . . . . .	Number	 000Ch	 
+VMSTAT_PAGEABLEV86_BIT . . . . .	Number	 000Ch	 
+VMSTAT_PAGEABLEV86 . . . . . . .	Number	 1000h	 
+VMSTAT_PM_APP_BIT  . . . . . . .	Number	 0006h	 
+VMSTAT_PM_APP  . . . . . . . . .	Number	 0040h	 
+VMSTAT_PM_EXEC_BIT . . . . . . .	Number	 0005h	 
+VMSTAT_PM_EXEC . . . . . . . . .	Number	 0020h	 
+VMSTAT_PM_USE32_BIT  . . . . . .	Number	 0007h	 
+VMSTAT_PM_USE32  . . . . . . . .	Number	 0080h	 
+VMSTAT_SUSPENDED_BIT . . . . . .	Number	 0003h	 
+VMSTAT_SUSPENDED . . . . . . . .	Number	 0008h	 
+VMSTAT_TS_MAXPRI_BIT . . . . . .	Number	 0012h	 
+VMSTAT_TS_MAXPRI . . . . . . . .	Number	 00040000h   
+VMSTAT_TS_SUSPENDED_BIT  . . . .	Number	 0011h	 
+VMSTAT_TS_SUSPENDED  . . . . . .	Number	 00020000h   
+VMSTAT_USE32_MASK  . . . . . . .	Number	 0180h	 
+VMSTAT_V86INTSLOCKEDBIT  . . . .	Number	 000Dh	 
+VMSTAT_V86INTSLOCKED_BIT . . . .	Number	 000Dh	 
+VMSTAT_V86INTSLOCKED . . . . . .	Number	 2000h	 
+VMSTAT_VXD_EXEC_BIT  . . . . . .	Number	 0008h	 
+VMSTAT_VXD_EXEC  . . . . . . . .	Number	 0100h	 
+VM_CRITICAL_INIT . . . . . . . .	Number	 0008h	 
+VM_INIT  . . . . . . . . . . . .	Number	 0009h	 
+VM_NOT_EXECUTEABLE2  . . . . . .	Number	 0028h	 
+VM_NOT_EXECUTEABLE . . . . . . .	Number	 000Bh	 
+VM_RESUME  . . . . . . . . . . .	Number	 000Eh	 
+VM_SUSPEND2  . . . . . . . . . .	Number	 002Ah	 
+VM_SUSPEND . . . . . . . . . . .	Number	 000Dh	 
+VM_TERMINATE2  . . . . . . . . .	Number	 0027h	 
+VM_TERMINATE . . . . . . . . . .	Number	 000Ah	 
+VNETBIOS_DEVICE_ID . . . . . . .	Number	 0014h	 
+VNETBIOS_INIT_ORDER  . . . . . .	Number	 54000000h   
+VNE_CLOSED_BIT . . . . . . . . .	Number	 0005h	 
+VNE_CLOSED . . . . . . . . . . .	Number	 0020h	 
+VNE_CRASHED_BIT  . . . . . . . .	Number	 0000h	 
+VNE_CRASHED  . . . . . . . . . .	Number	 0001h	 
+VNE_CREATEFAIL_BIT . . . . . . .	Number	 0002h	 
+VNE_CREATEFAIL . . . . . . . . .	Number	 0004h	 
+VNE_CRINITFAIL_BIT . . . . . . .	Number	 0003h	 
+VNE_CRINITFAIL . . . . . . . . .	Number	 0008h	 
+VNE_INITFAIL_BIT . . . . . . . .	Number	 0004h	 
+VNE_INITFAIL . . . . . . . . . .	Number	 0010h	 
+VNE_NUKED_BIT  . . . . . . . . .	Number	 0001h	 
+VNE_NUKED  . . . . . . . . . . .	Number	 0002h	 
+VPD_DEVICE_ID  . . . . . . . . .	Number	 000Fh	 
+VPD_INIT_ORDER . . . . . . . . .	Number	 3C000000h   
+VPEND_DEVICE_ID  . . . . . . . .	Number	 0025h	 
+VPICD_DEVICE_ID  . . . . . . . .	Number	 0003h	 
+VPICD_INIT_ORDER . . . . . . . .	Number	 0C000000h   
+VPOWERD_DEVICE_ID  . . . . . . .	Number	 0026h	 
+VPOWERD_INIT_ORDER . . . . . . .	Number	 01000000h   
+VPPID_Device_ID  . . . . . . . .	Number	 0063h	 
+VPROD_DEVICE_ID  . . . . . . . .	Number	 0019h	 
+VPROD_INIT_ORDER . . . . . . . .	Number	 08000000h   
+VSD_DEVICE_ID  . . . . . . . . .	Number	 000Bh	 
+VSD_INIT_ORDER . . . . . . . . .	Number	 2C000000h   
+VTD_DEVICE_ID  . . . . . . . . .	Number	 0005h	 
+VTD_INIT_ORDER . . . . . . . . .	Number	 14000000h   
+VWIN32_DEVICE_ID . . . . . . . .	Number	 002Ah	 
+VWIN32_INIT_ORDER  . . . . . . .	Number	 14100000h   
+VXDLDR_DEVICE_ID . . . . . . . .	Number	 0027h	 
+VXDLDR_INIT_ORDER  . . . . . . .	Number	 16000000h   
+VXDMHLPCaption . . . . . . . . .	Byte	 0000	  _ITEXT	
+VXDMHLPMessage . . . . . . . . .	Byte	 000C	  _ITEXT	
+VXD_FAILURE  . . . . . . . . . .	Number	 0000h	 
+VXD_SUCCESS  . . . . . . . . . .	Number	 0001h	 
+W32_DEVICEIOCONTROL  . . . . . .	Number	 0023h	 
+WIN32S_DEVICE_ID . . . . . . . .	Number	 002Dh	 
+WIN403SERVICES . . . . . . . . .	Number	 0001h	 
+WIN40SERVICES  . . . . . . . . .	Number	 0001h	 
+WIN41SERVICES  . . . . . . . . .	Number	 0001h	 
+WINDEBUG_DEVICE_ID . . . . . . .	Number	 001Dh	 
+WINDEBUG_INIT_ORDER  . . . . . .	Number	 81000000h   
+WINLOAD_DEVICE_ID  . . . . . . .	Number	 0016h	 
+WINLOAD_INIT_ORDER . . . . . . .	Number	 60000000h   
+_FLAT  . . . . . . . . . . . . .	Text   	 FLAT
+_VMM_  . . . . . . . . . . . . .	Number	 0001h	 
+fixret_continue  . . . . . . . .	L Near	 04B5	  _LTEXT	
+fixret_loop  . . . . . . . . . .	L Near	 0472	  _LTEXT	
+fixret_okay  . . . . . . . . . .	L Near	 04B0	  _LTEXT	
+hooked_time_loop . . . . . . . .	L Near	 03C5	  _LTEXT	
+iCall  . . . . . . . . . . . . .	Text   	 sCall
+init_hook_loop . . . . . . . . .	L Near	 014E	  _LTEXT	
+init_return_loop . . . . . . . .	L Near	 0195	  _LTEXT	
+internal_hookservice . . . . . .	L Near	 0291	  _LTEXT	
+internal_unhookservice . . . . .	L Near	 0342	  _LTEXT	
+ioctl_closehandle  . . . . . . .	L Near	 01F3	  _LTEXT	
+ioctl_docopy . . . . . . . . . .	L Near	 0248	  _LTEXT	
+ioctl_dozero . . . . . . . . . .	L Near	 0209	  _LTEXT	
+ioctl_failure  . . . . . . . . .	L Near	 0420	  _LTEXT	
+ioctl_getoverhead  . . . . . . .	L Near	 039B	  _LTEXT	
+ioctl_getstats . . . . . . . . .	L Near	 022B	  _LTEXT	
+ioctl_getversion . . . . . . . .	L Near	 01F8	  _LTEXT	
+ioctl_getzerostats . . . . . . .	L Near	 0232	  _LTEXT	
+ioctl_hookservice  . . . . . . .	L Near	 028C	  _LTEXT	
+ioctl_scanstats  . . . . . . . .	L Near	 0237	  _LTEXT	
+ioctl_success  . . . . . . . . .	L Near	 041C	  _LTEXT	
+ioctl_unhookservice  . . . . . .	L Near	 033D	  _LTEXT	
+ioctl_zerostats  . . . . . . . .	L Near	 01FD	  _LTEXT	
+nofree . . . . . . . . . . . . .	L Near	 04DA	  _LTEXT	
+nonpentium . . . . . . . . . . .	L Near	 005B	  _ITEXT	
+nozero . . . . . . . . . . . . .	L Near	 0285	  _LTEXT	
+ovrfound . . . . . . . . . . . .	L Near	 03E5	  _LTEXT	
+ovrsearch  . . . . . . . . . . .	L Near	 03D6	  _LTEXT	
+pentium  . . . . . . . . . . . .	L Near	 0074	  _ITEXT	
+rdts3  . . . . . . . . . . . . .	L Near	 039C	  _LTEXT	
+rdts4  . . . . . . . . . . . . .	L Near	 03AF	  _LTEXT	
+unhookall_done . . . . . . . . .	L Near	 0467	  _LTEXT	
+unhookall_loop . . . . . . . . .	L Near	 0431	  _LTEXT	
+unhookdel  . . . . . . . . . . .	L Near	 0458	  _LTEXT	
+unhooked_time_loop . . . . . . .	L Near	 03A6	  _LTEXT	
+unhookfound  . . . . . . . . . .	L Near	 0368	  _LTEXT	
+unhooksearch . . . . . . . . . .	L Near	 0354	  _LTEXT	
+
+	   0 Warnings
+	   0 Errors
