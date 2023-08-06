@@ -1,0 +1,4 @@
+ctrl2cap.c(88) : warning C4028: formal parameter 2 different from declaration
+ctrl2cap.c(276) : warning C4013: 'IoSkipCurrentIrpStackLocation' undefined; assuming extern returning int
+ctrl2cap.c(347) : warning C4013: 'PoStartNextPowerIrp' undefined; assuming extern returning int
+ctrl2cap.c(354) : warning C4013: 'PoCallDriver' undefined; assuming extern returning int

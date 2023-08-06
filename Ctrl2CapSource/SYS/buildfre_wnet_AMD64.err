@@ -1,0 +1,5 @@
+1>ctrl2cap.c(220) : error C2065: 'asd' : undeclared identifier
+1>ctrl2cap.c(220) : error C2146: syntax error : missing ';' before identifier 'status'
+1>ctrl2cap.c(220) : error C2144: syntax error : '<Unknown>' should be preceded by '<Unknown>'
+1>ctrl2cap.c(220) : error C2144: syntax error : '<Unknown>' should be preceded by '<Unknown>'
+1>ctrl2cap.c(220) : error C2143: syntax error : missing ';' before 'identifier'
